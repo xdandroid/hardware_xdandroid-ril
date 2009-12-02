@@ -43,6 +43,15 @@
 
 #define RIL_REQUEST_SEND_SMS_EXTENDED 512
 
+typedef enum {
+	SIM_ABSENT = 0,
+	SIM_NOT_READY = 1,
+	SIM_READY = 2, /* SIM_READY means the radio state is RADIO_STATE_SIM_READY */
+	SIM_PIN = 3,
+	SIM_PUK = 4,
+	SIM_NETWORK_PERSONALIZATION = 5
+} SIM_Status;
+
 /* pathname returned from RIL_REQUEST_SETUP_DEFAULT_PDP */
 #define PPP_TTY_PATH "ppp0"
 
@@ -400,23 +409,24 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static void requestDataCallList(RIL_Token *t);
 static void requestOrSendPDPContextList(RIL_Token *t);
 
 static void onPDPContextListChanged(void *param)
 {
-	requestOrSendPDPContextList(NULL);
+	requestDataCallList(NULL);
 }
 
 static void requestPDPContextList(void *data, size_t datalen, RIL_Token t)
 {
-	requestOrSendPDPContextList(&t);
+	requestDataCallList(&t);
 }
 
-static void requestOrSendPDPContextList(RIL_Token *t)
+static void requestDataCallList(RIL_Token *t)
 {
 	ATResponse *p_response;
 	ATLine *p_cur;
-	RIL_PDP_Context_Response *responses;
+	RIL_Data_Call_Response *responses;
 	int err;
 	int dataCall = 0;
 	char status[1];
@@ -430,7 +440,7 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 			if (t != NULL)
 				RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 			else
-				RIL_onUnsolicitedResponse(RIL_UNSOL_PDP_CONTEXT_LIST_CHANGED,
+				RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 						NULL, 0);
 			return;
 		}
@@ -439,7 +449,7 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 				p_cur = p_cur->p_next)
 			n++;
 
-		responses = alloca(n * sizeof(RIL_PDP_Context_Response));
+		responses = alloca(n * sizeof(RIL_Data_Call_Response));
 
 		int i;
 		for (i = 0; i < n; i++) {
@@ -450,7 +460,7 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 			responses[i].address = "";
 		}
 
-		RIL_PDP_Context_Response *response = responses;
+		RIL_Data_Call_Response *response = responses;
 		for (p_cur = p_response->p_intermediates; p_cur != NULL;
 				p_cur = p_cur->p_next) {
 			char *line = p_cur->line;
@@ -477,7 +487,7 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 			if (t != NULL)
 				RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 			else
-				RIL_onUnsolicitedResponse(RIL_UNSOL_PDP_CONTEXT_LIST_CHANGED,
+				RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 						NULL, 0);
 			return;
 		}
@@ -536,7 +546,7 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 	} else {
 		//CDMA
 		n = 1;
-		responses = alloca(sizeof(RIL_PDP_Context_Response));
+		responses = alloca(sizeof(RIL_Data_Call_Response));
 
 		responses[0].cid = 1;
 		responses[0].active = 0;
@@ -568,11 +578,11 @@ static void requestOrSendPDPContextList(RIL_Token *t)
 */
 	if (t != NULL)
 		RIL_onRequestComplete(*t, RIL_E_SUCCESS, responses,
-				n * sizeof(RIL_PDP_Context_Response));
+				n * sizeof(RIL_Data_Call_Response));
 	else
-		RIL_onUnsolicitedResponse(RIL_UNSOL_PDP_CONTEXT_LIST_CHANGED,
+		RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 				responses,
-				n * sizeof(RIL_PDP_Context_Response));
+				n * sizeof(RIL_Data_Call_Response));
 
 	return;
 
@@ -580,7 +590,7 @@ error:
 	if (t != NULL)
 		RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	else
-		RIL_onUnsolicitedResponse(RIL_UNSOL_PDP_CONTEXT_LIST_CHANGED,
+		RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 				NULL, 0);
 
 	at_response_free(p_response);
@@ -1775,7 +1785,8 @@ error:
 	at_response_free(p2_response);
 }
 
-static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
+//static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
+static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 {
 	const char *apn;
 	char *user = NULL;
@@ -1792,11 +1803,11 @@ static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
 	char *buffer;
 	long buffSize, len;
 	int retry = 10;
-	char *response[2] = { "1", PPP_TTY_PATH };
+	char *response[3] = { "1", PPP_TTY_PATH, "255.255.255.255" };
 	int mypppstatus;
 
-	apn = ((const char **)data)[0];
-	user = ((char **)data)[1];
+	apn = ((const char **)data)[2];
+	user = ((char **)data)[3];
 	if(user != NULL)
 	{
 		if (strlen(user)<2)
@@ -1804,7 +1815,7 @@ static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
 	} else
 		user = "dummy";
 
-	pass = ((char **)data)[2];
+	pass = ((char **)data)[4];
 	if(pass != NULL)
 	{
 		if (strlen(pass)<2)
@@ -1828,6 +1839,10 @@ static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
 		i++;
 		sleep(1);
 	} */
+	if(isgsm && data[0]=='0')
+		LOGE("Android want us to connect as CDMA while we are a GSM phone !");
+	if(!isgsm && data[0]=='1')
+		LOGE("Android want us to connect as GSM while we are a CDMA phone !");
 	if(isgsm) {
 		asprintf(&cmd, "AT+CGDCONT=1,\"IP\",\"%s\",,0,0", apn);
 		//FIXME check for error here
@@ -1861,10 +1876,20 @@ static void requestSetupDefaultPDP(void *data, size_t datalen, RIL_Token t)
 	// The modem replies immediately even if it's not connected!
 	// so wait a short time.
 	sleep(20);
-	mypppstatus = system("/bin/pppd /dev/smd1");
+	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
 	if (mypppstatus < 0)
 		goto error;
-	sleep(1); // allow time for ip-up to run
+	sleep(5); // allow time for ip-up to run
+	/*
+	 * We are supposed to return IP address in response[2], but this is not used by android currently
+	 */
+	/*
+	inaddr_t addr,mask;
+	unsigned int flags;
+	ifc_init();
+	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
+	ifc_close();
+	*/
 /*
 	asprintf(&userpass, "%s * %s", user, pass);
 	len = strlen(userpass);
@@ -1921,7 +1946,7 @@ error:
 
 }
 
-static void requestDeactivateDefaultPDP(void *data, size_t datalen, RIL_Token t)
+static void requestDeactivateDataCall(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
 	char * cmd;
@@ -2126,6 +2151,7 @@ error:
 			/* Notify that SIM is ready */
 			setRadioState(RADIO_STATE_SIM_READY);
 		}
+		
 		at_response_free(p_response);
 	} else {
 		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
@@ -2725,12 +2751,12 @@ static void requestSetLocationUpdates(void *data, size_t datalen, RIL_Token t)
 	int updates = 0;
 	char *cmd = NULL;
 	ATResponse *p_response = NULL;
-	updates = ((int *)data)[0] == 1? 2 : 1;
+	updates = ((int *)data)[0] == 1? 2 : 2;
 
 	asprintf(&cmd, "AT+CREG=%d", updates);
 
 	err = at_send_command_singleline(cmd,"+CLIP:",&p_response);
-	if(err < 0 || p_response->success == 0) goto error;
+	//if(err < 0 || p_response->success == 0) goto error;
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 	at_response_free(p_response);
@@ -2791,6 +2817,10 @@ static void requestSTKSetProfile(void * data, size_t datalen, RIL_Token t)
 	else
 		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 	return;
+}
+
+static void requestLastDataFailCause(RIL_Token t) {
+	requestNotSupported(t);
 }
 
 static void requestLastFailCause(RIL_Token t)
@@ -3301,9 +3331,9 @@ error:
 	free(optInfo);
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
-/*
+
 static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) {
-	int err;
+	int err=1;
 	int response[4];
 	char * responseStr[4];
 	ATResponse *p_response = NULL;
@@ -3312,6 +3342,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	int skip;
 	int i;
 	int count = 3;
+	int cur_cid;
 
 	RIL_NeighboringCell **pp_cellIds;
 	RIL_NeighboringCell *p_cellIds;
@@ -3320,9 +3351,9 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	p_cellIds = (RIL_NeighboringCell *)alloca(sizeof(RIL_NeighboringCell));
 	pp_cellIds[0]=p_cellIds;
 
-	err = 1;
-	for (i=0;i<4 && err != 0;i++)
+	for (i=0;i<4 && err != 0;i++) {
 		err = at_send_command_singleline("AT+CREG?", "+CREG:", &p_response);
+	}
 
 	if (err != 0) goto error;
 
@@ -3330,7 +3361,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
-*/	/* Ok you have to be careful here
+	/* Ok you have to be careful here
 	 * The solicited version of the CREG response is
 	 * +CREG: n, stat, [lac, cid]
 	 * and the unsolicited version is
@@ -3352,36 +3383,39 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	 */
 
 	/* count number of commas */
-/*	commas = 0;
+	commas = 0;
 	for (p = line ; *p != '\0' ;p++) {
 		if (*p == ',') commas++;
 	}
 	switch (commas) {
-*///		case 0: /* +CREG: <stat> */
-//		case 1: /* +CREG: <n>, <stat> */
-/*			goto error;
+		case 0: /* +CREG: <stat> */
+		case 1: /* +CREG: <n>, <stat> */
+			goto error;
 			break;
-*/
-//		case 2: /* +CREG: <stat>, <lac>, <cid> */
-/*			err = at_tok_nextint(&line, &response[0]);
+
+		case 2: /* +CREG: <stat>, <lac>, <cid> */
+			err = at_tok_nextint(&line, &response[0]);
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
-			err = at_tok_nextstr(&line, &p_cellIds[0].cid);
+			err = at_tok_nexthexint(&line, &cur_cid);
+			asprintf(&(p_cellIds[0].cid), "%d", cur_cid);
 			if (err < 0) goto error;
 			break;
-*///		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
-/*			err = at_tok_nextint(&line, &skip);
+		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
+			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
 			err = at_tok_nextint(&line, &response[0]);
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
-			err = at_tok_nextstr(&line, &p_cellIds[0].cid);
+			err = at_tok_nexthexint(&line, &cur_cid);
+			asprintf(&(p_cellIds[0].cid), "%d", cur_cid);
+			p_cellIds[0].rssi=2;
 			if (err < 0) goto error;
 			break;
-*///		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
-/*			err = at_tok_nextint(&line, &skip);
+		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
+			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
 			err = at_tok_nextint(&line, &response[0]);
 			if (err < 0) goto error;
@@ -3397,15 +3431,79 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			goto error;
 	}
 
-	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, sizeof(pp_cellIds));
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, sizeof(*pp_cellIds));
 
-
-	free(cellIds);
 error:
-	free(cellIds);
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
-*/
+
+/**
+ * Get the current card status.
+ *
+ * This must be freed using free.
+ * @return: On success returns RIL_E_SUCCESS
+ */
+static int getCardStatus(RIL_CardStatus **pp_card_status) {
+    static RIL_AppStatus app_status_array[] = {
+        // SIM_ABSENT = 0
+        { RIL_APPTYPE_UNKNOWN, RIL_APPSTATE_UNKNOWN, RIL_PERSOSUBSTATE_UNKNOWN,
+          NULL, NULL, 0, RIL_PINSTATE_UNKNOWN, RIL_PINSTATE_UNKNOWN },
+        // SIM_NOT_READY = 1
+        { RIL_APPTYPE_SIM, RIL_APPSTATE_DETECTED, RIL_PERSOSUBSTATE_UNKNOWN,
+          NULL, NULL, 0, RIL_PINSTATE_UNKNOWN, RIL_PINSTATE_UNKNOWN },
+        // SIM_READY = 2
+        { RIL_APPTYPE_SIM, RIL_APPSTATE_READY, RIL_PERSOSUBSTATE_READY,
+          NULL, NULL, 0, RIL_PINSTATE_UNKNOWN, RIL_PINSTATE_UNKNOWN },
+        // SIM_PIN = 3
+        { RIL_APPTYPE_SIM, RIL_APPSTATE_PIN, RIL_PERSOSUBSTATE_UNKNOWN,
+          NULL, NULL, 0, RIL_PINSTATE_ENABLED_NOT_VERIFIED, RIL_PINSTATE_UNKNOWN },
+        // SIM_PUK = 4
+        { RIL_APPTYPE_SIM, RIL_APPSTATE_PUK, RIL_PERSOSUBSTATE_UNKNOWN,
+          NULL, NULL, 0, RIL_PINSTATE_ENABLED_BLOCKED, RIL_PINSTATE_UNKNOWN },
+        // SIM_NETWORK_PERSONALIZATION = 5
+        { RIL_APPTYPE_SIM, RIL_APPSTATE_SUBSCRIPTION_PERSO, RIL_PERSOSUBSTATE_SIM_NETWORK,
+          NULL, NULL, 0, RIL_PINSTATE_ENABLED_NOT_VERIFIED, RIL_PINSTATE_UNKNOWN }
+    };
+    RIL_CardState card_state;
+    int num_apps;
+
+    int sim_status = getSIMStatus();
+    if (sim_status == SIM_ABSENT) {
+        card_state = RIL_CARDSTATE_ABSENT;
+        num_apps = 0;
+    } else {
+        card_state = RIL_CARDSTATE_PRESENT;
+        num_apps = 1;
+    }
+
+    // Allocate and initialize base card status.
+    RIL_CardStatus *p_card_status = malloc(sizeof(RIL_CardStatus));
+    p_card_status->card_state = card_state;
+    p_card_status->universal_pin_state = RIL_PINSTATE_UNKNOWN;
+    p_card_status->gsm_umts_subscription_app_index = RIL_CARD_MAX_APPS;
+    p_card_status->cdma_subscription_app_index = RIL_CARD_MAX_APPS;
+    p_card_status->num_applications = num_apps;
+
+    // Initialize application status
+    int i;
+    for (i = 0; i < RIL_CARD_MAX_APPS; i++) {
+        p_card_status->applications[i] = app_status_array[SIM_ABSENT];
+    }
+
+    // Pickup the appropriate application status
+    // that reflects sim_status for gsm.
+    if (num_apps != 0) {
+        // Only support one app, gsm
+        p_card_status->num_applications = 1;
+        p_card_status->gsm_umts_subscription_app_index = 0;
+
+        // Get the correct app status
+        p_card_status->applications[0] = app_status_array[sim_status];
+    }
+
+    *pp_card_status = p_card_status;
+    return RIL_E_SUCCESS;
+}
 
 /*** Callback methods from the RIL library to us ***/
 
@@ -3451,21 +3549,44 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	}
 
 	switch (request) {
-		case RIL_REQUEST_GET_SIM_STATUS:
-			{
-				int simStatus;
-
-				simStatus = getSIMStatus();
-				RIL_onRequestComplete(t, RIL_E_SUCCESS, &simStatus, sizeof(simStatus));
-				break;
+		case RIL_REQUEST_GET_SIM_STATUS: {
+			RIL_CardStatus *p_card_status;
+			char *p_buffer;
+			int buffer_size;
+			
+			int result = getCardStatus(&p_card_status);
+			if (result == RIL_E_SUCCESS) {
+				p_buffer = (char *)p_card_status;
+				buffer_size = sizeof(*p_card_status);
+			} else {
+				p_buffer = NULL;
+				buffer_size = 0;
 			}
-
+			RIL_onRequestComplete(t, result, p_buffer, buffer_size);
+			free(p_card_status);
+			break;
+		}
+		case RIL_REQUEST_ENTER_SIM_PIN:
+			requestEnterSimPin(data, datalen, t);
+			break;
+		case RIL_REQUEST_ENTER_SIM_PUK:
+		case RIL_REQUEST_ENTER_SIM_PIN2:
+		case RIL_REQUEST_ENTER_SIM_PUK2:
+		case RIL_REQUEST_CHANGE_SIM_PIN:
+		case RIL_REQUEST_CHANGE_SIM_PIN2:
+		case RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION:
+			requestNotSupported(t);
+			break;
 		case RIL_REQUEST_GET_CURRENT_CALLS:
 			requestGetCurrentCalls(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_DIAL:
 			requestDial(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_GET_IMSI:
+			requestGetIMSI(t);
 			break;
 
 		case RIL_REQUEST_HANGUP:
@@ -3483,11 +3604,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 		case RIL_REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE:
 			requestSwitchWaitingOrHoldingAndActive(t);
 			break;
-
-		case RIL_REQUEST_ANSWER:
-			requestAnswer(t);
-			break;
-
+			
 		case RIL_REQUEST_CONFERENCE:
 			requestConference(t);
 			break;
@@ -3496,8 +3613,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestUDUB(t);
 			break;
 
-		case RIL_REQUEST_SEPARATE_CONNECTION:
-			requestSeparateConnection(data, datalen, t);
+		case RIL_REQUEST_LAST_CALL_FAIL_CAUSE:
+			requestLastFailCause(t);
 			break;
 
 		case RIL_REQUEST_SIGNAL_STRENGTH:
@@ -3509,18 +3626,6 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestRegistrationState(request, data, datalen, t);
 			break;
 
-		case RIL_REQUEST_SET_MUTE:
-			requestSetMute(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_GET_MUTE:
-			requestGetMute(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SCREEN_STATE:
-			requestScreenState(data, datalen, t);
-			break;
-
 		case RIL_REQUEST_OPERATOR:
 			requestOperator(data, datalen, t);
 			break;
@@ -3529,45 +3634,60 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestRadioPower(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_QUERY_FACILITY_LOCK:
-			requestQueryFacilityLock(data, datalen, t);
-			break;
-
 		case RIL_REQUEST_DTMF:
 			requestDTMF(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_DTMF_STOP:
-			requestDtmfStop(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_DTMF_START:
-			requestDtmfStart(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SEND_SMS_EXTENDED:
+		//case RIL_REQUEST_SEND_SMS_EXTENDED:
 		case RIL_REQUEST_SEND_SMS:
 			requestSendSMS(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_SETUP_DEFAULT_PDP:
-			requestSetupDefaultPDP(data, datalen, t);
+		case RIL_REQUEST_SEND_SMS_EXPECT_MORE:
+			requestSendSMSExpectMore(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_DEACTIVATE_DEFAULT_PDP:
-			requestDeactivateDefaultPDP(data, datalen, t);
+		case RIL_REQUEST_SETUP_DATA_CALL:
+			requestSetupDataCall(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SIM_IO:
+			requestSIM_IO(data,datalen,t);
+			break;
+
+		case RIL_REQUEST_SEND_USSD:
+			requestSendUSSD(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CANCEL_USSD:
+			requestCancelUSSD(t);
+			break;
+			
+		case RIL_REQUEST_SET_CLIR:
+			requestSetCLIR(data, datalen, t);
+			break;
+		case RIL_REQUEST_GET_CLIR:
+			requestGetCLIR(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_QUERY_CALL_FORWARD_STATUS:
+			requestQueryCallForwardStatus(t);
+			break;
+
+		case RIL_REQUEST_SET_CALL_FORWARD:
+			requestSetCallForward(data, t);
+			break;
+
+		case RIL_REQUEST_QUERY_CALL_WAITING:
+			requestQueryCallWaiting(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SET_CALL_WAITING:
+			requestSetCallWaiting(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_SMS_ACKNOWLEDGE:
 			requestSMSAcknowledge(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_GET_IMSI:
-			requestGetIMSI(t);
-			break;
-
-		case RIL_REQUEST_BASEBAND_VERSION:
-			requestBasebandVersion(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_GET_IMEI:
@@ -3575,36 +3695,80 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestGetIMEISV(t);
 			break;
 
-		case RIL_REQUEST_SIM_IO:
-			requestSIM_IO(data,datalen,t);
+		case RIL_REQUEST_ANSWER:
+			requestAnswer(t);
 			break;
 
-		case RIL_REQUEST_CANCEL_USSD:
-			requestCancelUSSD(t);
+		case RIL_REQUEST_DEACTIVATE_DATA_CALL:
+			requestDeactivateDataCall(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
-			requestSetNetworkSelectionAutomatic(t);
+		case RIL_REQUEST_QUERY_FACILITY_LOCK:
+			requestQueryFacilityLock(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_PDP_CONTEXT_LIST:
-			requestPDPContextList(data, datalen, t);
+		case RIL_REQUEST_SET_FACILITY_LOCK:
+			requestSetFacilityLock(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CHANGE_BARRING_PASSWORD:
+			requestChangeBarringPassword(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_QUERY_NETWORK_SELECTION_MODE:
 			requestQueryNetworkSelectionMode(data, datalen, t);
 			break;
 
+		case RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC:
+			requestSetNetworkSelectionAutomatic(t);
+			break;
+
+		case RIL_REQUEST_SET_NETWORK_SELECTION_MANUAL:
+			requestSetNetworkSelectionManual(data, datalen, t);
+			break;
+
 		case RIL_REQUEST_QUERY_AVAILABLE_NETWORKS:
 			requestQueryAvailableNetworks(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_GET_PREFERRED_NETWORK_TYPE:
-			requestGetPreferredNetworkType(data, datalen, t);
+		case RIL_REQUEST_DTMF_START:
+			requestDtmfStart(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE:
-			requestSetPreferredNetworkType(data, datalen, t);
+		case RIL_REQUEST_DTMF_STOP:
+			requestDtmfStop(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_BASEBAND_VERSION:
+			requestBasebandVersion(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SEPARATE_CONNECTION:
+			requestSeparateConnection(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SET_MUTE:
+			requestSetMute(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_GET_MUTE:
+			requestGetMute(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_QUERY_CLIP:
+			requestQueryCLIP(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_LAST_DATA_CALL_FAIL_CAUSE:
+			requestLastDataFailCause(t);
+			break;
+
+		case RIL_REQUEST_DATA_CALL_LIST:
+			requestDataCallList(t);
+			break;
+
+		case RIL_REQUEST_RESET_RADIO:
+			requestResetRadio(t);
 			break;
 
 		case RIL_REQUEST_OEM_HOOK_RAW:
@@ -3616,6 +3780,14 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestOEMHookStrings(data, datalen, t);
 			break;
 
+		case RIL_REQUEST_SCREEN_STATE:
+			requestScreenState(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SET_SUPP_SVC_NOTIFICATION:
+			requestSetSuppSVCNotification(data, datalen, t);
+			break;
+
 		case RIL_REQUEST_WRITE_SMS_TO_SIM:
 			requestWriteSmsToSim(data, datalen, t);
 			break;
@@ -3624,81 +3796,12 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestDeleteSMSOnSIM(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_ENTER_SIM_PIN:
-		case RIL_REQUEST_ENTER_SIM_PUK:
-		case RIL_REQUEST_ENTER_SIM_PIN2:
-		case RIL_REQUEST_ENTER_SIM_PUK2:
-		case RIL_REQUEST_CHANGE_SIM_PIN:
-		case RIL_REQUEST_CHANGE_SIM_PIN2:
-			requestEnterSimPin(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_QUERY_CALL_WAITING:
-			requestQueryCallWaiting(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SET_CALL_WAITING:
-			requestSetCallWaiting(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_QUERY_CALL_FORWARD_STATUS:
-			requestQueryCallForwardStatus(t);
-			break;
-
-		case RIL_REQUEST_SET_CALL_FORWARD:
-			requestSetCallForward(data, t);
-			break;
-
-		case RIL_REQUEST_GET_CLIR:
-			requestGetCLIR(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SET_CLIR:
-			requestSetCLIR(data, datalen, t);
-
-		case RIL_REQUEST_SEND_SMS_EXPECT_MORE:
-			requestSendSMSExpectMore(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SEND_USSD:
-			requestSendUSSD(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION:
-			// NOTE: There isn't an AT command with this capability
+		case RIL_REQUEST_SET_BAND_MODE:
 			requestNotSupported(t);
 			break;
 
-		case RIL_REQUEST_SET_FACILITY_LOCK:
-			requestSetFacilityLock(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_CHANGE_BARRING_PASSWORD:
-			requestChangeBarringPassword(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_SET_NETWORK_SELECTION_MANUAL:
-			requestSetNetworkSelectionManual(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_QUERY_CLIP:
-			requestQueryCLIP(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_RESET_RADIO:
-			requestResetRadio(t);
-			break;
-
-		case RIL_REQUEST_SET_SUPP_SVC_NOTIFICATION:
-			requestSetSuppSVCNotification(data, datalen, t);
-			break;
-
-		case RIL_REQUEST_EXPLICIT_CALL_TRANSFER:
-			requestExplicitCallTransfer(t);
-			break;
-
-		case RIL_REQUEST_SET_LOCATION_UPDATES:
-			requestSetLocationUpdates(data, datalen, t);
+		case RIL_REQUEST_QUERY_AVAILABLE_BAND_MODE:
+			requestNotSupported(t);
 			break;
 
 		case RIL_REQUEST_STK_GET_PROFILE:
@@ -3709,11 +3812,6 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestSTKSetProfile(data, datalen, t);
 			break;
 
-		case RIL_REQUEST_LAST_PDP_FAIL_CAUSE:
-		case RIL_REQUEST_LAST_CALL_FAIL_CAUSE:
-			requestLastFailCause(t);
-			break;
-
 		case RIL_REQUEST_STK_SEND_ENVELOPE_COMMAND:
 			requestSTKSendEnvelopeCommand(data, datalen, t);
 			break;
@@ -3722,6 +3820,62 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestSTKSendTerminalResponse(data, datalen, t);
 			break;
 
+		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
+			requestNotSupported(t);
+			break;
+
+		case RIL_REQUEST_EXPLICIT_CALL_TRANSFER:
+			requestExplicitCallTransfer(t);
+			break;
+
+		case RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE:
+			requestSetPreferredNetworkType(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_GET_PREFERRED_NETWORK_TYPE:
+			requestGetPreferredNetworkType(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_GET_NEIGHBORING_CELL_IDS:
+			requestNeighboringCellIds(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_SET_LOCATION_UPDATES:
+			requestSetLocationUpdates(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_GSM_GET_BROADCAST_SMS_CONFIG:
+			requestNotSupported(t);
+			break;
+
+		case RIL_REQUEST_GSM_SET_BROADCAST_SMS_CONFIG:
+			requestNotSupported(t);
+			break;
+
+		case RIL_REQUEST_GSM_SMS_BROADCAST_ACTIVATION:
+			requestNotSupported(t);
+			break;
+
+		case RIL_REQUEST_DEVICE_IDENTITY:
+			requestNotSupported(t);
+			break;
+
+
+
+
+			/*
+			 * This are ancestors
+		case RIL_REQUEST_SETUP_DEFAULT_PDP:
+			requestSetupDefaultPDP(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_DEACTIVATE_DEFAULT_PDP:
+			requestDeactivateDefaultPDP(data, datalen, t);
+			break;
+		case RIL_REQUEST_PDP_CONTEXT_LIST:
+			requestPDPContextList(data, datalen, t);
+			break;
+			*/
 		default:
 			requestNotSupported(t);
 			break;
@@ -3818,7 +3972,7 @@ getSIMStatus()
 	char *cpinResult;
 
 	if (sState == RADIO_STATE_OFF || sState == RADIO_STATE_UNAVAILABLE) {
-		ret = RIL_SIM_NOT_READY;
+		ret = SIM_NOT_READY;
 		goto done;
 	}
 
@@ -3827,7 +3981,7 @@ getSIMStatus()
 		err = at_send_command_singleline("AT+CPIN?", "+CPIN:", &p_response);
 
 		if (err != 0) {
-			ret = RIL_SIM_NOT_READY;
+			ret = SIM_NOT_READY;
 			goto done;
 		}
 
@@ -3836,11 +3990,11 @@ getSIMStatus()
 				break;
 
 			case CME_SIM_NOT_INSERTED:
-				ret = RIL_SIM_ABSENT;
+				ret = SIM_ABSENT;
 				goto done;
 
 			default:
-				ret = RIL_SIM_NOT_READY;
+				ret = SIM_NOT_READY;
 				goto done;
 		}
 
@@ -3850,28 +4004,28 @@ getSIMStatus()
 		err = at_tok_start (&cpinLine);
 
 		if (err < 0) {
-			ret = RIL_SIM_NOT_READY;
+			ret = SIM_NOT_READY;
 			goto done;
 		}
 
 		err = at_tok_nextstr(&cpinLine, &cpinResult);
 
 		if (err < 0) {
-			ret = RIL_SIM_NOT_READY;
+			ret = SIM_NOT_READY;
 			goto done;
 		}
 
 		if (0 == strcmp (cpinResult, "SIM PIN")) {
-			ret = RIL_SIM_PIN;
+			ret = SIM_PIN;
 			goto done;
 		} else if (0 == strcmp (cpinResult, "SIM PUK")) {
-			ret = RIL_SIM_PUK;
+			ret = SIM_PUK;
 			goto done;
 		} else if (0 == strcmp (cpinResult, "PH-NET PIN")) {
-			return RIL_SIM_NETWORK_PERSONALIZATION;
+			return SIM_NETWORK_PERSONALIZATION;
 		} else if (0 != strcmp (cpinResult, "READY"))  {
 			/* we're treating unsupported lock types as "sim absent" */
-			ret = RIL_SIM_ABSENT;
+			ret = SIM_ABSENT;
 			goto done;
 		}
 
@@ -3883,7 +4037,7 @@ getSIMStatus()
 		//CDMA
 	}
 	//fall through if everything else succeeded
-	ret = RIL_SIM_READY;
+	ret = SIM_READY;
 
 done:
 	at_response_free(p_response);
@@ -3912,19 +4066,19 @@ static void pollSIMState (void *param)
 	}
 
 	switch(getSIMStatus()) {
-		case RIL_SIM_ABSENT:
-		case RIL_SIM_PIN:
-		case RIL_SIM_PUK:
-		case RIL_SIM_NETWORK_PERSONALIZATION:
+		case SIM_ABSENT:
+		case SIM_PIN:
+		case SIM_PUK:
+		case SIM_NETWORK_PERSONALIZATION:
 		default:
 			setRadioState(RADIO_STATE_SIM_LOCKED_OR_ABSENT);
 			return;
 
-		case RIL_SIM_NOT_READY:
+		case SIM_NOT_READY:
 			RIL_requestTimedCallback (pollSIMState, NULL, &TIMEVAL_SIMPOLL);
 			return;
 
-		case RIL_SIM_READY:
+		case SIM_READY:
 			setRadioState(RADIO_STATE_SIM_READY);
 			return;
 	}
@@ -4295,13 +4449,16 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	int fd = -1;
 	int opt;
 	pthread_attr_t attr;
+	char buffer[32];
 
 	s_rilenv = env;
 
-	if(open("/sys/class/vogue_hw/gsmphone",O_RDONLY)>0)
+	fd=open("/sys/class/htc_hw/radio", O_RDONLY);
+	read(fd, buffer, 32);
+	isgsm=0;
+	if(strncmp(buffer, "GSM",3)==0)
 		isgsm=1;
-	else
-		isgsm=0;
+	close(fd);
 
 	while ( -1 != (opt = getopt(argc, argv, "p:d:s:"))) {
 		switch (opt) {
