@@ -1865,7 +1865,9 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	} else {
 		//CDMA
+		err = at_send_command("AT+CFUN=1", NULL);
 		err = at_send_command("AT+HTC_DUN=0", NULL);
+		err = at_send_command("ATH", NULL);
 		err = at_send_command("ATDT#777", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			at_response_free(p_response);
