@@ -1713,8 +1713,10 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 			err = at_tok_nextint(&line, &tosca);
 			if (err < 0) goto error;
 
-			if(temp[0]=='+')
-				plus = 1;
+			if(temp[0]=='+') {
+				sscanf(&line, "00%s", temp+1);
+				//plus = 1;
+			}
 
 			length = strlen(temp) - plus;
 			sprintf(smsc,"%.2x%.2x",(length + 1) / 2 + 1, tosca);
