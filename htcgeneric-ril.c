@@ -1577,8 +1577,8 @@ static void requestRegistrationState(int request, void *data,
 	if (request == RIL_REQUEST_GPRS_REGISTRATION_STATE && dataCall == 0)
 		response[0] = 3; Dont modify response */
 	asprintf(&responseStr[0], "%d", response[0]);
-	asprintf(&responseStr[1], "%d", response[1]);
-	asprintf(&responseStr[2], "%d", response[2]);
+	asprintf(&responseStr[1], "%x", response[1]);
+	asprintf(&responseStr[2], "%x", response[2]);
 
 	if (count > 3)
 		asprintf(&responseStr[3], "%d", response[3]);
@@ -3403,7 +3403,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%d", cur_cid);
+			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
 			if (err < 0) goto error;
 			break;
 		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
@@ -3414,7 +3414,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%d", cur_cid);
+			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
 			p_cellIds[0].rssi=2;
 			if (err < 0) goto error;
 			break;
