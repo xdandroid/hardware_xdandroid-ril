@@ -103,6 +103,7 @@ static RIL_RadioState sState = RADIO_STATE_UNAVAILABLE;
 static pthread_mutex_t s_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_state_cond = PTHREAD_COND_INITIALIZER;
 
+static int slow_sim=0;
 static int s_port = -1;
 static const char * s_device_path = NULL;
 static int          s_device_socket = 0;
@@ -2026,6 +2027,8 @@ static void  requestSIM_IO(void *data, size_t datalen, RIL_Token t)
 	memset(&sr, 0, sizeof(sr));
 
 	p_args = (RIL_SIM_IO *)data;
+	if(slow_sim)
+		usleep(slow_sim);
 
 	/* FIXME handle pin2 */
 
@@ -4446,6 +4449,32 @@ mainLoop(void *param)
 #ifdef RIL_SHLIB
 
 pthread_t s_tid_mainloop;
+void parse_cmdline() {
+	int fd=open("/proc/cmdline", O_RDONLY);
+	char buf[1024];
+	char *ptr,*ptr2;
+	int i;
+	buf[1023]=0;
+	if(fd<0)
+		return;
+	if(read(fd, buf, 1023)<0) {
+		close(fd);
+		return;
+	}
+	ptr=strstr(buf, "force_cdma=");
+	if(ptr && (ptr==buf || ptr[-1]==' ')) {
+		ptr+=strlen("force_cdma=");
+		if(atoi(ptr))
+			isgsm=0;
+		else
+			isgsm=1;
+	}
+	ptr=strstr(buf, "slow_sim=");
+	if(ptr && (ptr==buf || ptr[-1]==' ')) {
+		ptr+=strlen("slow_sim=");
+		slow_sim=atoi(ptr);
+	}
+}
 
 const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **argv)
 {
@@ -4463,6 +4492,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	if(strncmp(buffer, "GSM",3)==0)
 		isgsm=1;
 	close(fd);
+	parse_cmdline();
 
 	while ( -1 != (opt = getopt(argc, argv, "p:d:s:"))) {
 		switch (opt) {
