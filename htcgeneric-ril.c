@@ -1094,7 +1094,7 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
 		case 0: clir = ""; break;   /*subscription default*/
 	}
 	writesys("audio","2");
-	if(cdma_north_american_dialing)
+	if(cdma_north_american_dialing && strncmp(p_dial->address, "+", 2)==0)
 		asprintf(&cmd, "ATD%s%s;", p_dial->address+1, clir);
 	else
 		asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
