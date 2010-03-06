@@ -105,6 +105,7 @@ static pthread_cond_t s_state_cond = PTHREAD_COND_INITIALIZER;
 
 static int slow_sim=0;
 static int s_port = -1;
+static int cdma_north_american_dialing = 0;
 static const char * s_device_path = NULL;
 static int          s_device_socket = 0;
 
@@ -1093,7 +1094,10 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
 		case 0: clir = ""; break;   /*subscription default*/
 	}
 	writesys("audio","2");
-	asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
+	if(cdma_north_american_dialing)
+		asprintf(&cmd, "ATD%s%s;", p_dial->address+1, clir);
+	else
+		asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
 
 	ret = at_send_command(cmd, NULL);
 
@@ -4473,6 +4477,11 @@ void parse_cmdline() {
 	if(ptr && (ptr==buf || ptr[-1]==' ')) {
 		ptr+=strlen("slow_sim=");
 		slow_sim=atoi(ptr);
+	}
+	ptr=strstr(buf, "north_am_dialing=");
+	if(ptr && (ptr==buf || ptr[-1]==' ')) {
+		ptr+=strlen("north_am_dialing=");
+		cdma_north_american_dialing=atoi(ptr);
 	}
 }
 
