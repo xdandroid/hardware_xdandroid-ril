@@ -1719,7 +1719,7 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 			if (err < 0) goto error;
 
 			if(temp[0]=='+') {
-				sscanf(&line, "00%s", temp+1);
+				sscanf(line, "00%s", temp+1);
 				//plus = 1;
 			}
 
@@ -1846,9 +1846,9 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		i++;
 		sleep(1);
 	} */
-	if(isgsm && data[0]=='0')
+	if(isgsm && *data[0]=='0')
 		LOGE("Android want us to connect as CDMA while we are a GSM phone !");
-	if(!isgsm && data[0]=='1')
+	if(!isgsm && *data[0]=='1')
 		LOGE("Android want us to connect as GSM while we are a CDMA phone !");
 	if(isgsm) {
 		asprintf(&cmd, "AT+CGDCONT=1,\"IP\",\"%s\",,0,0", apn);
@@ -2544,8 +2544,8 @@ static void  unsolicitedUSSD(const char *s)
 {
 	char *line, *linestart;
 	int typeCode, count, err, len;
-	unsigned char *message;
-	unsigned char *outputmessage;
+	char *message;
+	char *outputmessage;
 	char *responseStr[2];
 
 	LOGD("unsolicitedUSSD %s\n",s);
@@ -2561,9 +2561,9 @@ static void  unsolicitedUSSD(const char *s)
 		err = at_tok_nextstr(&line, &message);
 		if(err < 0) goto error;
 		outputmessage = malloc(strlen(message)*2+1);
-		gsm_hex_to_bytes(message,strlen(message),outputmessage);
+		gsm_hex_to_bytes((cbytes_t)message,strlen(message),(bytes_t)outputmessage);
 		responseStr[1] = malloc(strlen(outputmessage)*2+1);
-		len = utf8_from_gsm8(outputmessage,strlen(outputmessage),responseStr[1]);
+		len = utf8_from_gsm8((cbytes_t)outputmessage,strlen(outputmessage),(bytes_t)responseStr[1]);
 		responseStr[1][strlen(message)/2]='\0';
 		free(outputmessage);
 		count = 2;
@@ -2582,11 +2582,12 @@ error:
 }
 
 static void  unsolicitedERI(const char *s) {
-	char *line;
+	char *line, *origline;
 	int temp;
 	char *newEri;
 
-	line = strdup(s);
+	origline = strdup(s);
+	line = origline;
 	at_tok_start(&line);
 
 	at_tok_nextint(&line, &temp);
@@ -2597,9 +2598,11 @@ static void  unsolicitedERI(const char *s) {
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
 	at_tok_nextstr(&line, &newEri);
+
 	if(strlen(newEri)<50)
 		strcpy(erisystem,newEri);
-	free(line);
+
+	free(origline);
 }
 
 static void requestSetFacilityLock(void *data, size_t datalen, RIL_Token t)
