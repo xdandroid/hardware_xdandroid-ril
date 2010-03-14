@@ -1720,8 +1720,10 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t)
 			if (err < 0) goto error;
 
 			if(temp[0]=='+') {
+				/*
 				snprintf(temp2, 64, "00%s", temp+1);
-				temp=temp2;
+				temp=temp2;*/
+				++temp;
 				//plus = 1;
 			}
 
