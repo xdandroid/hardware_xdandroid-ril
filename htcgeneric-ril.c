@@ -782,7 +782,6 @@ error:
 
 static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token t)
 {
-#ifdef USE_IDCC_MODEM
 	int err, rat;
 	ATResponse *p_response = NULL;
 	char * cmd = NULL;
@@ -791,6 +790,7 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	assert (datalen >= sizeof(int *));
 	rat = ((int *)data)[0];
 
+#ifdef USE_IDCC_MODEM
 	switch (rat)
 	{
 		case 0: at_rat = "1,2"; break;/* Dual Mode - WCDMA preferred*/
@@ -803,6 +803,26 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	if (err < 0) goto error;
 
 	asprintf(&cmd, "AT+XRAT=%s", at_rat);
+#else
+	LOGD("In requestSetPreferredNetworkType RAPH");
+	switch (rat) {
+		case 0: at_rat = "2,1,0"; break;/* Dual Mode - WCDMA preferred*/
+		case 1: at_rat = "2,1,1"; break;  /* GSM only */
+		case 2: at_rat = "2,1,2"; break;  /* WCDMA only */
+	}
+
+	/* Need to unregister from NW before changing preferred RAT */
+	err = at_send_command("AT+COPS=2", NULL);
+	if (err < 0) goto error;
+
+	/* For some reason, without the bandset command, the CGAATT
+	one fails. [mdrobnak] */
+	err = at_send_command("AT+BANDSET=0", NULL);
+	if (err < 0) goto error;
+
+	asprintf(&cmd, "AT+CGAATT=%s", at_rat);
+
+#endif /* USE_IDCC_MODEM */
 	err = at_send_command(cmd, &p_response);
 	free(cmd);
 
@@ -822,11 +842,6 @@ error:
 	at_response_free(p_response);
 	LOGE("ERROR: requestSetPreferredNetworkType() failed\n");
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-
-#else
-	LOGE("ERROR: requestSetPreferredNetworkType() failed - command not supported by modem\n");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-#endif /* USE_IDCC_MODEM */
 }
 
 
