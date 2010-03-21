@@ -1886,24 +1886,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		}
 		at_response_free(p_response);
 	}
-	// The modem replies immediately even if it's not connected!
-	// so wait a short time.
-	sleep(20);
-	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
-	if (mypppstatus < 0)
-		goto error;
-	sleep(5); // allow time for ip-up to run
-	/*
-	 * We are supposed to return IP address in response[2], but this is not used by android currently
-	 */
-	/*
-	inaddr_t addr,mask;
-	unsigned int flags;
-	ifc_init();
-	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
-	ifc_close();
-	*/
-/*
+
 	asprintf(&userpass, "%s * %s", user, pass);
 	len = strlen(userpass);
 	fd = open("/etc/ppp/pap-secrets",O_WRONLY);
@@ -1944,13 +1927,23 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	fclose(pppconfig);
 	free(buffer);
 
-	sleep(1);
-	fd = open("/smodem/control",O_WRONLY);
-	if(fd < 0)
+	// The modem replies immediately even if it's not connected!
+	// so wait a short time.
+	sleep(20);
+	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
+	if (mypppstatus < 0)
 		goto error;
-	write(fd, "startppp", 8);
-	close(fd);
-*/
+	sleep(5); // allow time for ip-up to run
+	/*
+	 * We are supposed to return IP address in response[2], but this is not used by android currently
+	 */
+	/*
+	inaddr_t addr,mask;
+	unsigned int flags;
+	ifc_init();
+	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
+	ifc_close();
+	*/
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	return;
 
