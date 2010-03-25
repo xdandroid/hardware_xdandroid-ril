@@ -1902,7 +1902,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-	asprintf(&userpass, "%s * %s", user, pass);
+	asprintf(&userpass, "%s * %s\n", user, pass);
 	len = strlen(userpass);
 	fd = open("/etc/ppp/pap-secrets",O_WRONLY);
 	if(fd < 0)
@@ -1938,7 +1938,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 
 	pppconfig = fopen("/etc/ppp/options.smd1","w");
 	fwrite(buffer,1,buffSize,pppconfig);
-	fprintf(pppconfig,"name %s\n",user);
+	fprintf(pppconfig,"user %s\n",user);
 	fclose(pppconfig);
 	free(buffer);
 
