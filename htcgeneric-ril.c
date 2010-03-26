@@ -2182,6 +2182,35 @@ error:
 	}
 }
 
+static void  requestChangeSimPin(void*  data, size_t  datalen, RIL_Token  t)
+{
+	ATResponse   *p_response = NULL;
+	int           err;
+	char*         cmd = NULL;
+	const char**  strings = (const char**)data;;
+
+	if(isgsm) {
+		if ( datalen == 2*sizeof(char*) )
+			asprintf(&cmd, "AT+CPWD=\"SC\",\"%s\",\"%s\"", strings[0], strings[1]);
+		else
+			goto error;
+
+		err = at_send_command(cmd, &p_response);
+		free(cmd);
+
+		if (err < 0 || p_response->success == 0) {
+error:
+			RIL_onRequestComplete(t, RIL_E_PASSWORD_INCORRECT, NULL, 0);
+		}
+		else
+			RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+		
+		at_response_free(p_response);
+	} else {
+		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+	}
+}
+
 
 static void unsolicitedNitzTime(const char * s)
 {
@@ -3593,8 +3622,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			break;
 		}
 		case RIL_REQUEST_ENTER_SIM_PIN:
-		case RIL_REQUEST_CHANGE_SIM_PIN:
 			requestEnterSimPin(data, datalen, t);
+			break;
+		case RIL_REQUEST_CHANGE_SIM_PIN:
+			requestChangeSimPin(data, datalen, t);
 			break;
 		case RIL_REQUEST_ENTER_SIM_PUK:
 		case RIL_REQUEST_ENTER_SIM_PIN2:
