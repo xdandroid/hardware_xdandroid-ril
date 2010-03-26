@@ -2162,7 +2162,7 @@ static void  requestEnterSimPin(void*  data, size_t  datalen, RIL_Token  t)
 		} else
 			goto error;
 
-		err = at_send_command_singleline(cmd, "+CPIN:", &p_response);
+		err = at_send_command_singleline(cmd, "+CREG:", &p_response);
 		free(cmd);
 
 		if (err < 0 || p_response->success == 0) {
@@ -3593,12 +3593,12 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			break;
 		}
 		case RIL_REQUEST_ENTER_SIM_PIN:
+		case RIL_REQUEST_CHANGE_SIM_PIN:
 			requestEnterSimPin(data, datalen, t);
 			break;
 		case RIL_REQUEST_ENTER_SIM_PUK:
 		case RIL_REQUEST_ENTER_SIM_PIN2:
 		case RIL_REQUEST_ENTER_SIM_PUK2:
-		case RIL_REQUEST_CHANGE_SIM_PIN:
 		case RIL_REQUEST_CHANGE_SIM_PIN2:
 		case RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION:
 			requestNotSupported(t);
