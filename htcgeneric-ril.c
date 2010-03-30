@@ -3062,6 +3062,8 @@ static void requestGetIMSI(RIL_Token t)
 			goto error;
 		imsi = strdup(p_response->p_intermediates->line);
 	} else {
+		/* Disable this until CDMA uses the real IMSI */
+#if 0
 		err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
 
 		if (err < 0 || p_response->success == 0)
@@ -3082,6 +3084,7 @@ static void requestGetIMSI(RIL_Token t)
 		part = strdup(response);
 
 		at_response_free(p_response);
+		free (part);
 
 		err = at_send_command_singleline("AT+CNUM", "+CNUM:", &p_response);
 
@@ -3096,10 +3099,10 @@ static void requestGetIMSI(RIL_Token t)
 		err = at_tok_nextstr(&line, &response);
 		if (err < 0)
 			goto error;
+#endif
 		//FIXME make it work with the real IMSI: asprintf(&imsi, "%s%s", part, response); //Real opID
 		asprintf(&imsi, "310995000000000"); //Fake opID
 
-		free (part);
 	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, imsi, sizeof(char *));
