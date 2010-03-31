@@ -138,6 +138,7 @@ static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
 
 static int isgsm=0;
+static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
 static char erisystem[50];
 static char *callwaiting_num;
 static int countValidCalls=0;
@@ -384,7 +385,13 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		if(isgsm)
 			err = at_send_command("AT+CFUN=0", &p_response);
 		else
-			err = at_send_command("AT+CFUN=66", &p_response);
+		{
+			if (is_world_cdma)
+				err = at_send_command("AT+CFUN=0", &p_response);
+			else
+				err = at_send_command("AT+CFUN=66", &p_response);
+		}
+
 		if (err < 0 || p_response->success == 0) goto error;
 		setRadioState(RADIO_STATE_OFF);
 	} else if (onOff > 0 && sState == RADIO_STATE_OFF) {
@@ -1425,7 +1432,12 @@ static void requestRegistrationState(int request, void *data,
 			goto error;
 		}
 	} else {
-		cmd = "AT+COPS?";
+		/* "Regular" CDMA (like Diam/Raph) uses AT+COPS, world phone CDMA uses AT+HTC_SRV_STATUS */
+		if (is_world_cdma)
+			cmd = "AT+HTC_SRV_STATUS?";
+		else
+			cmd = "AT+COPS?";
+
 		prefix= "$HTC_SYSTYPE";
 	}
 	err = 1;
@@ -3127,21 +3139,31 @@ static void requestGetIMEISV(RIL_Token t)
 					p_response->p_intermediates->line, sizeof(char *));
 		}
 	} else {
-		char * line;
-		unsigned long int imei;
-		char * imeiString;
+		/* On world phone, AT+GSN returns the IMEI in decimal. This can be returned directly.
+		 * On regular CDMA, AT+GSN returns the ESN in hex. This has to be converted to decimal.
+		 */
+
 		err = at_send_command_numeric("AT+GSN", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 		} else {
-			line = p_response->p_intermediates->line;
-			imei = (unsigned long)hex2int(line[9]) + (unsigned long)16*hex2int(line[8])
-				+ (unsigned long)256*hex2int(line[7]) + (unsigned long)4096*hex2int(line[6])
-				+ (unsigned long)65536*hex2int(line[5]) + (unsigned long)1048576*hex2int(line[4])
-				+ (unsigned long)16777216*hex2int(line[3]) + (unsigned long)268435456*hex2int(line[2]);
-			asprintf(&imeiString,"%015lu",imei);
-			RIL_onRequestComplete(t, RIL_E_SUCCESS,imeiString, sizeof(char *));
-			free(imeiString);
+			char * line = p_response->p_intermediates->line;
+			if (line[1] == 'x') {
+				/* Hex ESN: regular CDMA */
+				unsigned long int imei;
+				char * imeiString;
+				imei = (unsigned long)hex2int(line[9]) + (unsigned long)16*hex2int(line[8])
+					+ (unsigned long)256*hex2int(line[7]) + (unsigned long)4096*hex2int(line[6])
+					+ (unsigned long)65536*hex2int(line[5]) + (unsigned long)1048576*hex2int(line[4])
+					+ (unsigned long)16777216*hex2int(line[3]) + (unsigned long)268435456*hex2int(line[2]);
+				asprintf(&imeiString,"%015lu",imei);
+				RIL_onRequestComplete(t, RIL_E_SUCCESS,imeiString, sizeof(char *));
+				free(imeiString);
+			} else {
+				/* Decimal IMEI: world phone in CDMA mode */
+				RIL_onRequestComplete(t, RIL_E_SUCCESS,
+						p_response->p_intermediates->line, sizeof(char *));
+			}
 		}
 
 	}
@@ -4191,8 +4213,18 @@ static void initializeCallback(void *param)
 	/* make sure the radio is off */
 	if(isgsm)
 		at_send_command("AT+CFUN=0", NULL);
-	else
-		at_send_command("AT+CFUN=66", NULL);
+	else {
+		/* Sending 'AT+CFUN=0' to a CDMA diam/raph eventually causes a "FATAL_ERROR: SM_TM (oncrpc_cb.c:00596)"
+		 * Send 'CFUN=66' first, if that errors then we know this is a world phone */
+		at_send_command("AT+CFUN=66", &p_response);
+		if (p_response->success == 0)
+		{
+			is_world_cdma = 1;
+			LOGD("Running on a world phone in CDMA mode\n");
+			at_send_command("AT+CFUN=0", NULL);
+		}
+		at_response_free(p_response);
+	}
 
 
 	setRadioState (RADIO_STATE_OFF);
@@ -4308,6 +4340,9 @@ static void initializeCallback(void *param)
 		at_send_command("AT+GTKC=2", NULL);
 
 
+	} else {
+		if (is_world_cdma)
+			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
 	}
 	/* assume radio is off on error */
 	if (isRadioOn() > 0) {
