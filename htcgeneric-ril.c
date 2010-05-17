@@ -1344,8 +1344,19 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 	if(screenState == 1)
 	{
 		if (isgsm) {
+			/*
+			 if (ppt)
+			 	"AT+ENCSQ=1;\r"
+			 else
+				 "AT+ENCSQ=1;+CREG=2\r"
+
+			requestRegistrationState
+
+			 "AT+HTCCTZR=1\r"
+			 "AT@HTCPDPFD=0\r"
+			 */
 			/* Screen is on - be sure to enable all unsolicited notifications again */
-			err = at_send_command("AT+CREG=2", NULL);
+/*			err = at_send_command("AT+CREG=2", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT+CGREG=2", NULL);
 			if (err < 0) goto error;
@@ -1356,14 +1367,30 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT+ENCSQ=1",NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCCSQ=1", NULL);
+			if (err < 0) goto error;*/
+
+			err = at_send_command("AT+ENCSQ=1;+CREG=2", NULL);
 			if (err < 0) goto error;
+			err = at_send_command("AT+HTCCTZR=1", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT@HTCPDPFD=0", NULL);
+			if (err < 0) goto error;			
 		} else {
 
 		}
 	} else if (screenState == 0) {
 		if (isgsm) {
+			/*
+				"AT+HTCPDPIDLE\r"
+			 	if (ppt)
+					"AT+ENCSQ=0;\r"
+				else
+					"AT+ENCSQ=0;+CREG=1\r"
+				"AT+HTCCTZR=2\r"
+				"AT@HTCPDPFD=1"
+			 */
 			/* Screen is off - disable all unsolicited notifications */
-			err = at_send_command("AT+CREG=0", NULL);
+			/*err = at_send_command("AT+CREG=0", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT+CGREG=0", NULL);
 			if (err < 0) goto error;
@@ -1374,6 +1401,15 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT+ENCSQ=0",NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCCSQ=0", NULL);
+			if (err < 0) goto error;*/
+
+			err = at_send_command("AT+HTCPDPIDLE", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT+ENCSQ=0;+CREG=1", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT+HTCCTZR=2", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT@HTCPDPFD=1", NULL);
 			if (err < 0) goto error;
 		} else {
 
