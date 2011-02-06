@@ -222,7 +222,7 @@ void writesys(char *name, char *val) {
 	strcat(filename,name);
 	fout=fopen(filename,"w");
 	if(!fout) return;
-	fprintf(fout,val);
+	fprintf(fout, "%s", val);
 	fclose(fout);
 }
 /**
