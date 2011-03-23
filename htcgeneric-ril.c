@@ -4141,7 +4141,7 @@ done:
 /**
  * Get the current card status.
  *
- * This must be freed using free.
+ * This must be freed using freeCardStatus.
  * @return: On success returns RIL_E_SUCCESS
  */
 static int getCardStatus(RIL_CardStatus **pp_card_status) {
