@@ -119,7 +119,10 @@ static int s_closed = 0;
 static int sFD;     /* file desc of AT channel */
 static char sATBuffer[MAX_AT_RESPONSE+1];
 static char *sATBufferCur = NULL;
-static char *sNITZtime = NULL;
+	/* Higher layers expect a NITZ string in this format:
+	 *  08/10/28,19:08:37-20,1 (yy/mm/dd,hh:mm:ss(+/-)tz,dst)
+	 */
+static char sNITZtime[sizeof("08/10/28,19:08:37-20,1")+4];
 
 static const struct timeval TIMEVAL_SIMPOLL = {1,0};
 static const struct timeval TIMEVAL_CALLSTATEPOLL = {0,500000};
@@ -153,16 +156,22 @@ static void handle_cdma_ccwa (const char *s)
 	int err;
 	char *line, *tmp;
 
+	if (callwaiting_num)
+	{
+		free(callwaiting_num);
+		callwaiting_num = NULL;
+	}
 	line = tmp = strdup(s);
 	err = at_tok_start(&tmp);
 	if (err)
-		return;
+		goto out;
 	err = at_tok_nextstr(&tmp, &callwaiting_num);
 	if (err)
-		return;
+		goto out;
 	callwaiting_num = strdup(callwaiting_num);
-	free(line);
 	LOGE("successfully set callwaiting_numn");
+out:
+	free(line);
 }
 
 extern char** cdma_to_gsmpdu(const char *);
@@ -2293,10 +2302,10 @@ static void unsolicitedNitzTime(const char * s)
 {
 	int err;
 	char * response = NULL;
-	char * line = NULL;
+	char * line, *origline;
 	char * p = NULL;
 	char * tz = NULL; /* Timezone */
-	line = strdup(s);
+	origline = line = strdup(s);
 
 	/* Higher layers expect a NITZ string in this format:
 	 *  08/10/28,19:08:37-20,1 (yy/mm/dd,hh:mm:ss(+/-)tz,dst)
@@ -2315,10 +2324,7 @@ static void unsolicitedNitzTime(const char * s)
 		err = at_tok_nextstr(&line, &response);
 		if (err < 0) goto error;
 
-		strcat(response,tz);
-
-		sNITZtime = response;
-		return;
+		snprintf(sNITZtime, sizeof(sNITZtime), "%s%s", response, tz);
 
 	}
 	else if(strStartsWith(s,"+CTZDST:")){
@@ -2333,7 +2339,6 @@ static void unsolicitedNitzTime(const char * s)
 
 		RIL_onUnsolicitedResponse(RIL_UNSOL_NITZ_TIME_RECEIVED, response, strlen(response));
 		free(response);
-		return;
 
 	}
 	else if(strStartsWith(s, "+HTCCTZV:")){
@@ -2342,9 +2347,10 @@ static void unsolicitedNitzTime(const char * s)
 		err = at_tok_nextstr(&line, &response);
 		if (err < 0) goto error;
 		RIL_onUnsolicitedResponse(RIL_UNSOL_NITZ_TIME_RECEIVED, response, strlen(response));
-		return;
 
 	}
+	free(origline);
+	return;
 
 error:
 	LOGE("Invalid NITZ line %s\n", s);
@@ -2697,6 +2703,7 @@ static void  unsolicitedUSSD(const char *s)
 	return;
 
 error:
+	free(linestart);
 	LOGE("unexpectedUSSD error\n");
 }
 
