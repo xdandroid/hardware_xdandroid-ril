@@ -1210,6 +1210,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 	int response[2];
 	char *line;
 
+#if 0	/* Just rely on unsolicited reports */
 	if(signalStrength[0] == 0 && signalStrength[1] == 0) {
 		if(isgsm)
 			err = at_send_command_singleline("AT+CSQ", "+CSQ:", &p_response);
@@ -1244,6 +1245,9 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 		response[0] = signalStrength[0];
 		response[1] = signalStrength[1];
 	}
+#endif
+	response[0] = signalStrength[0];
+	response[1] = signalStrength[1];
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	return;
 
@@ -2350,9 +2354,11 @@ static void unsolicitedRSSI(const char * s)
 {
 	int err;
 	int response[2];
-	char * line = NULL;
+	char * line = NULL, *origline;
+	const unsigned char asu_table[6]={0,2,6,12,25,31};
 
-	line = strdup(s);
+	origline = strdup(s);
+	line = origline;
 
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
@@ -2360,14 +2366,12 @@ static void unsolicitedRSSI(const char * s)
 	err = at_tok_nextint(&line, &(response[0]));
 	if (err < 0) goto error;
 
-//	err = at_tok_nextint(&line, &(response[1]));
-//	if (err < 0) goto error;
-	response[0]*=2;
+	response[0]=asu_table[response[0]%6];
 	response[1]=99;
 
 	signalStrength[0]=response[0];
 	signalStrength[1]=response[1];
-//	free(line);
+	free(origline);
 
 	RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, response, sizeof(response));
 	return;
