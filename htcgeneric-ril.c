@@ -1606,7 +1606,7 @@ static void requestRegistrationState(int request, void *data,
 						if (err < 0) goto error;
 						/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
 						switch(response[3]) {
-							/* GSM/GSM Compact - aka GRPS */
+							/* GSM/GSM Compact - aka GPRS */
 							case 0:
 							case 1:
 								response[3] = 1;
@@ -1620,11 +1620,17 @@ static void requestRegistrationState(int request, void *data,
 							case 7:
 								response[3] = 3;
 								break;
-								/* UTRAN with HSDPA and/or HSUPA aka Turbo-3G */
+								/* UTRAN with HSDPA */
 							case 4:
-							case 5:
-							case 6:
 								response[3] = 9;
+								break;
+								/* UTRAN with HSUPA */
+							case 5:
+								response[3] = 10;
+								break;
+								/* UTRAN with HSPA (HSDPA and HSUPA) */
+							case 6:
+								response[3] = 11;
 								break;
 						}
 					}
@@ -1650,6 +1656,9 @@ static void requestRegistrationState(int request, void *data,
 				at_tok_nextstr(&p, &responseStr[2]);
 				err = at_tok_nexthexint(&line, &response[3]);
 				if (err < 0) goto error;
+				/* the network type really ought to be decoded as above, but
+				 * none of our devices actually get here so far
+				 */
 				break;
 			default:
 				goto error;
