@@ -587,25 +587,20 @@ static void requestOrSendDataCallList(RIL_Token *t)
 			if (err < 0)
 				goto error;
 
-			responses[i].type = alloca(strlen(out) + 1);
-			strcpy(responses[i].type, out);
+			responses[i].type = out;
 
 			err = at_tok_nextstr(&line, &out);
 			if (err < 0)
 				goto error;
 
-			responses[i].apn = alloca(strlen(out) + 1);
-			strcpy(responses[i].apn, out);
+			responses[i].apn = out;
 
 			err = at_tok_nextstr(&line, &out);
 			if (err < 0)
 				goto error;
 
-			responses[i].address = alloca(strlen(out) + 1);
-			strcpy(responses[i].address, out);
+			responses[i].address = out;
 		}
-
-		at_response_free(p_response);
 
 	} else {
 		//CDMA
@@ -640,16 +635,16 @@ static void requestOrSendDataCallList(RIL_Token *t)
 				responses,
 				n * sizeof(RIL_Data_Call_Response));
 
+	at_response_free(p_response);
 	return;
 
 error:
+	at_response_free(p_response);
 	if (t != NULL)
 		RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	else
 		RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 				NULL, 0);
-
-	at_response_free(p_response);
 }
 
 static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
@@ -1687,7 +1682,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	int i;
 	int skip;
 	ATLine *p_cur;
-	char *response[4];
+	char *response[3];
 
 	memset(response, 0, sizeof(response));
 
@@ -1739,9 +1734,6 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 
 		if (i < 3) {
 			goto error;
-		}
-		if (i == 3) {
-			response[3] = '\0';
 		}
 	}
 	else {
@@ -3572,9 +3564,10 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
+			p = line;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
 			if (err < 0) goto error;
+			err = at_tok_nextstr(&p, &p_cellIds[0].cid);
 			break;
 		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
 			err = at_tok_nextint(&line, &skip);
@@ -3583,10 +3576,11 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
+			p = line;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
-			p_cellIds[0].rssi=2;
 			if (err < 0) goto error;
+			p_cellIds[0].rssi=2;
+			err = at_tok_nextstr(&p, &p_cellIds[0].cid);
 			break;
 		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
 			err = at_tok_nextint(&line, &skip);
