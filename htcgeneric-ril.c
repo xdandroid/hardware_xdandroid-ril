@@ -4492,7 +4492,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
 				NULL, 0);
-		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
+/*		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); */
 	} else if (strStartsWith(s, "+CMT:")) {
 		LOGD("GSM_PDU=%s\n",sms_pdu);
 		if(!isgsm) {
