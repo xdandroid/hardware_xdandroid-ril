@@ -1469,7 +1469,6 @@ static void requestRegistrationState(int request, void *data,
 {
 	int err;
 	int response[4];
-	char * responseStr[4];
 	ATResponse *p_response = NULL;
 	const char *cmd;
 	const char *prefix;
@@ -1480,12 +1479,14 @@ static void requestRegistrationState(int request, void *data,
 	int count = 4;
 	int fd;
 	int dataCall = 0;
-	char status[1];
+	char status[3];
+	char nettype[3];
+	char *responseStr[4] = {status, NULL, NULL, nettype};
 
 	response[0]=1;
-	response[1]=-1;
-	response[2]=-1;
-	response[3]=1;
+	response[1]=0;
+	response[2]=0;
+	response[3]=0;
 
 	if(isgsm) {
 		if (request == RIL_REQUEST_REGISTRATION_STATE) {
@@ -1549,8 +1550,6 @@ static void requestRegistrationState(int request, void *data,
 			case 0: /* +CREG: <stat> */
 				err = at_tok_nextint(&line, &response[0]);
 				if (err < 0) goto error;
-				response[1] = -1;
-				response[2] = -1;
 				break;
 
 			case 1: /* +CREG: <n>, <stat> */
@@ -1558,28 +1557,33 @@ static void requestRegistrationState(int request, void *data,
 				if (err < 0) goto error;
 				err = at_tok_nextint(&line, &response[0]);
 				if (err < 0) goto error;
-				response[1] = -1;
-				response[2] = -1;
-				if (err < 0) goto error;
 				break;
 
 			case 2: /* +CREG: <stat>, <lac>, <cid> */
 				err = at_tok_nextint(&line, &response[0]);
 				if (err < 0) goto error;
+				p = line;
 				err = at_tok_nexthexint(&line, &response[1]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[1]);
+				p = line;
 				err = at_tok_nexthexint(&line, &response[2]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[2]);
 				break;
 			case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
 				err = at_tok_nextint(&line, &skip);
 				if (err < 0) goto error;
 				err = at_tok_nextint(&line, &response[0]);
 				if (err < 0) goto error;
+				p = line;
 				err = at_tok_nexthexint(&line, &response[1]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[1]);
+				p = line;
 				err = at_tok_nexthexint(&line, &response[2]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[2]);
 
 				/* Hack for broken +CGREG responses which don't return the network type */
 				if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE) {
@@ -1641,10 +1645,14 @@ static void requestRegistrationState(int request, void *data,
 				if (err < 0) goto error;
 				err = at_tok_nextint(&line, &response[0]);
 				if (err < 0) goto error;
+				p = line;
 				err = at_tok_nexthexint(&line, &response[1]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[1]);
+				p = line;
 				err = at_tok_nexthexint(&line, &response[2]);
 				if (err < 0) goto error;
+				at_tok_nextstr(&p, &responseStr[2]);
 				err = at_tok_nexthexint(&line, &response[3]);
 				if (err < 0) goto error;
 				break;
@@ -1660,10 +1668,8 @@ static void requestRegistrationState(int request, void *data,
 				response[3] = 3;
 		}
 	}
-	asprintf(&responseStr[0], "%d", response[0]);
-	asprintf(&responseStr[1], "%x", response[1]);
-	asprintf(&responseStr[2], "%x", response[2]);
-	asprintf(&responseStr[3], "%d", response[3]);
+	sprintf(status, "%d", response[0]);
+	sprintf(nettype, "%d", response[3]);
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, count*sizeof(char*));
 	at_response_free(p_response);
