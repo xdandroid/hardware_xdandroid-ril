@@ -1406,8 +1406,14 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT+HTCCTZR=1", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
-			if (err < 0) goto error;			
+			if (err < 0) goto error;
 		} else {
+			err = at_send_command("AT+ENCSQ=1;+ENBSINFO=1", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT+HTCCTZR=1", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT@HTCPDPFD=0", NULL);
+			if (err < 0) goto error;
 
 		}
 	} else if (screenState == 0) {
@@ -1444,6 +1450,12 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
 			if (err < 0) goto error;
 		} else {
+			err = at_send_command("AT+ENCSQ=0;+ENBSINFO=0", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT+HTCCTZR=2", NULL);
+			if (err < 0) goto error;
+			err = at_send_command("AT@HTCPDPFD=1", NULL);
+			if (err < 0) goto error;
 
 		}
 	} else {
@@ -4452,6 +4464,9 @@ static void initializeCallback(void *param)
 	} else {
 		if (is_world_cdma)
 			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		at_send_command("AT+ENCSQ=1", NULL);
+		at_send_command("AT+ENBSINFO=1", NULL);
+		at_send_command("AT@HTCPDPFD=0", NULL);
 	}
 	/* assume radio is off on error */
 	if (isRadioOn() > 0) {
