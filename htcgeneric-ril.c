@@ -1486,7 +1486,7 @@ static void requestRegistrationState(int request, void *data,
 	int i;
 	int count = 4;
 	int fd;
-	int state = 0, radiotype = 0;
+	int state = 0, radiotype = -1;
 	char sstate[3];
 	char sradiotype[3];
 	char *responseStr[14] = {sstate, NULL, NULL, sradiotype};
@@ -1625,35 +1625,6 @@ static void requestRegistrationState(int request, void *data,
 					if (err < 0) goto error;
 					err = at_tok_nextint(&line_op, &radiotype);
 					if (err < 0) goto error;
-					/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
-					switch(radiotype) {
-						/* GSM/GSM Compact - aka GPRS */
-						case 0:
-						case 1:
-							radiotype = 1;
-							break;
-							/* EGPRS - aka EDGE */
-						case 3:
-							radiotype = 2;
-							break;
-							/* UTRAN - UMTS aka 3G */
-						case 2:
-						case 7:
-							radiotype = 3;
-							break;
-							/* UTRAN with HSDPA */
-						case 4:
-							radiotype = 9;
-							break;
-							/* UTRAN with HSUPA */
-						case 5:
-							radiotype = 10;
-							break;
-							/* UTRAN with HSPA (HSDPA and HSUPA) */
-						case 6:
-							radiotype = 11;
-							break;
-					}
 				}
 
 				at_response_free(p_response_op);
@@ -1677,21 +1648,56 @@ static void requestRegistrationState(int request, void *data,
 			at_tok_nextstr(&p, &responseStr[2]);
 			err = at_tok_nexthexint(&line, &radiotype);
 			if (err < 0) goto error;
-			/* the network type really ought to be decoded as above, but
-			 * none of our devices actually get here so far
-			 */
 			break;
 		default:
 			goto error;
 	}
 
-	if (!isgsm) {
+	if (isgsm) {
+		/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
+		switch(radiotype) {
+			/* GSM/GSM Compact - aka GPRS */
+			case 0:
+			case 1:
+				radiotype = 1;
+				break;
+				/* EGPRS - aka EDGE */
+			case 3:
+				radiotype = 2;
+				break;
+				/* UTRAN - UMTS aka 3G */
+			case 2:
+			case 7:
+				radiotype = 3;
+				break;
+				/* UTRAN with HSDPA */
+			case 4:
+				radiotype = 9;
+				break;
+				/* UTRAN with HSUPA */
+			case 5:
+				radiotype = 10;
+				break;
+				/* UTRAN with HSPA (HSDPA and HSUPA) */
+			case 6:
+				radiotype = 11;
+				break;
+			default:
+				radiotype = 0;	/* unknown */
+		}
+	} else {
 		if (radiotype == 2)	/* 1xRTT */
 			radiotype=6;
 		else if (radiotype == 3)	/* EvDO 0 */
 			radiotype=7;
-		else if (radiotype == 4)	/* EvDO A */
+		else if (radiotype >= 4)	/* EvDO A */
 			radiotype=8;
+#if 0
+		else if (radiotype == 5)	/* EvDO B? */
+			radiotype = 12;		/* Gingerbread only? */
+#endif
+		else if (radiotype == -1)	/* unknown */
+			radiotype = 0;
 
 		if (state == 1 || state == 5) {	/* registered (home || roaming) */
 			char *line_bs;
