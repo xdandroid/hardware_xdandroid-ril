@@ -653,25 +653,35 @@ static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
 	ATResponse *p_response = NULL;
-	char * response = NULL;
 	char* line = NULL;
+	char response[256], *ptr;
 
-	if (isgsm) {
-		err = at_send_command_singleline("AT+CGMM", "", &p_response);
-		if (err != 0) goto error;
+	/* AMSS version */
+	err = at_send_command_singleline("AT+RADIOVER", "+RADIOVER:", &p_response);
+	if (err != 0) goto error;
 
-		line = p_response->p_intermediates->line;
+	line = p_response->p_intermediates->line;
 
-		response = (char *)alloca(sizeof(char *));
+	at_tok_start(&line);
+	err = at_tok_nextstr(&line, &ptr);
+	if (err < 0) goto error;
+	strncpy(response, ptr, 128);
+	response[128] = '\0';
+	at_response_free(p_response);
 
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0) goto error;
+	/* Radio version */
+	err = at_send_command_singleline("AT@v", "", &p_response);
+	if (err != 0) goto error;
 
-		RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(char *));
-		at_response_free(p_response);
-	} else {
-		RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
-	}
+	line = p_response->p_intermediates->line;
+	err = at_tok_nextstr(&line, &ptr);
+	if (err < 0) goto error;
+	strcat(response, "_");
+	strncat(response, ptr, 127);
+	response[255] = '\0';
+	at_response_free(p_response);
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(char *));
 	return;
 
 error:
