@@ -2451,7 +2451,11 @@ static void unsolicitedRSSI(const char * s)
 	err = at_tok_nextint(&line, &(response[0]));
 	if (err < 0) goto error;
 
+#if 0
 	response[0]=asu_table[response[0]%6];
+#else
+	response[0]*=2;
+#endif
 	response[1]=99;
 
 	signalStrength[0]=response[0];
