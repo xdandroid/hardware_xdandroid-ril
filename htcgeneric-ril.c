@@ -2976,22 +2976,16 @@ static void requestSetLocationUpdates(void *data, size_t datalen, RIL_Token t)
 {
 	int err = 0;
 	int updates = 0;
-	char *cmd = NULL;
-	ATResponse *p_response = NULL;
-	updates = ((int *)data)[0] == 1? 2 : 2;
+	char cmd[sizeof("AT+CREG=1")];
+	updates = ((int *)data)[0] == 1? 2 : 1;
 
-	asprintf(&cmd, "AT+CREG=%d", updates);
+	sprintf(cmd, "AT+CREG=%d", updates);
 
-	err = at_send_command_singleline(cmd,"+CLIP:",&p_response);
-	//if(err < 0 || p_response->success == 0) goto error;
-
-	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-	at_response_free(p_response);
-	return;
-
-error:
-	at_response_free(p_response);
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	err = at_send_command(cmd,NULL);
+	if(err < 0)
+		RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	else
+		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
 static void requestSTKGetprofile(RIL_Token t)
