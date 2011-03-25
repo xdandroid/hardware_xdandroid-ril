@@ -150,6 +150,7 @@ static char erisystem[50];
 static char *callwaiting_num;
 static int countValidCalls=0;
 static int signalStrength[2];
+static char eriPRL[4];
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -1475,8 +1476,7 @@ static void requestRegistrationState(int request, void *data,
 		size_t datalen, RIL_Token t)
 {
 	int err;
-	int response[4];
-	ATResponse *p_response = NULL;
+	ATResponse *p_response = NULL, *p_response_bs = NULL;
 	const char *cmd;
 	const char *prefix;
 	char *line, *p;
@@ -1485,15 +1485,10 @@ static void requestRegistrationState(int request, void *data,
 	int i;
 	int count = 4;
 	int fd;
-	int cdma_systype = 0;
-	char status[3];
-	char nettype[3];
-	char *responseStr[4] = {status, NULL, NULL, nettype};
-
-	response[0]=1;
-	response[1]=0;
-	response[2]=0;
-	response[3]=0;
+	int state = 0, radiotype = 0;
+	char sstate[3];
+	char sradiotype[3];
+	char *responseStr[14] = {sstate, NULL, NULL, sradiotype};
 
 	if(isgsm) {
 		if (request == RIL_REQUEST_REGISTRATION_STATE) {
@@ -1523,7 +1518,7 @@ static void requestRegistrationState(int request, void *data,
 			line = p_response->p_intermediates->line;
 			err = at_tok_start(&line);
 			if(err==0)
-				err = at_tok_nextint(&line, &cdma_systype);
+				err = at_tok_nextint(&line, &radiotype);
 		}
 		cmd = "AT+CREG?";
 		prefix = "+CREG:";
@@ -1568,40 +1563,40 @@ static void requestRegistrationState(int request, void *data,
 
 	switch (commas) {
 		case 0: /* +CREG: <stat> */
-			err = at_tok_nextint(&line, &response[0]);
+			err = at_tok_nextint(&line, &state);
 			if (err < 0) goto error;
 			break;
 
 		case 1: /* +CREG: <n>, <stat> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &response[0]);
+			err = at_tok_nextint(&line, &state);
 			if (err < 0) goto error;
 			break;
 
 		case 2: /* +CREG: <stat>, <lac>, <cid> */
-			err = at_tok_nextint(&line, &response[0]);
+			err = at_tok_nextint(&line, &state);
 			if (err < 0) goto error;
 			p = line;
-			err = at_tok_nexthexint(&line, &response[1]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[1]);
 			p = line;
-			err = at_tok_nexthexint(&line, &response[2]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[2]);
 			break;
 		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &response[0]);
+			err = at_tok_nextint(&line, &state);
 			if (err < 0) goto error;
 			p = line;
-			err = at_tok_nexthexint(&line, &response[1]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[1]);
 			p = line;
-			err = at_tok_nexthexint(&line, &response[2]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[2]);
 
@@ -1627,35 +1622,35 @@ static void requestRegistrationState(int request, void *data,
 					if (err < 0) goto error;
 					err = at_tok_nextint(&line_op, &skip);
 					if (err < 0) goto error;
-					err = at_tok_nextint(&line_op, &response[3]);
+					err = at_tok_nextint(&line_op, &radiotype);
 					if (err < 0) goto error;
 					/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
-					switch(response[3]) {
+					switch(radiotype) {
 						/* GSM/GSM Compact - aka GPRS */
 						case 0:
 						case 1:
-							response[3] = 1;
+							radiotype = 1;
 							break;
 							/* EGPRS - aka EDGE */
 						case 3:
-							response[3] = 2;
+							radiotype = 2;
 							break;
 							/* UTRAN - UMTS aka 3G */
 						case 2:
 						case 7:
-							response[3] = 3;
+							radiotype = 3;
 							break;
 							/* UTRAN with HSDPA */
 						case 4:
-							response[3] = 9;
+							radiotype = 9;
 							break;
 							/* UTRAN with HSUPA */
 						case 5:
-							response[3] = 10;
+							radiotype = 10;
 							break;
 							/* UTRAN with HSPA (HSDPA and HSUPA) */
 						case 6:
-							response[3] = 11;
+							radiotype = 11;
 							break;
 					}
 				}
@@ -1669,17 +1664,17 @@ static void requestRegistrationState(int request, void *data,
 		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &response[0]);
+			err = at_tok_nextint(&line, &state);
 			if (err < 0) goto error;
 			p = line;
-			err = at_tok_nexthexint(&line, &response[1]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[1]);
 			p = line;
-			err = at_tok_nexthexint(&line, &response[2]);
+			err = at_tok_nexthexint(&line, &skip);
 			if (err < 0) goto error;
 			at_tok_nextstr(&p, &responseStr[2]);
-			err = at_tok_nexthexint(&line, &response[3]);
+			err = at_tok_nexthexint(&line, &radiotype);
 			if (err < 0) goto error;
 			/* the network type really ought to be decoded as above, but
 			 * none of our devices actually get here so far
@@ -1690,18 +1685,48 @@ static void requestRegistrationState(int request, void *data,
 	}
 
 	if (!isgsm) {
-		if (cdma_systype == 2)	/* 1xRTT */
-			cdma_systype=6;
-		else if (cdma_systype == 3)	/* EvDO 0 */
-			cdma_systype=7;
-		else if (cdma_systype == 4)	/* EvDO A */
-			cdma_systype=8;
-		response[3] = cdma_systype;
+		if (radiotype == 2)	/* 1xRTT */
+			radiotype=6;
+		else if (radiotype == 3)	/* EvDO 0 */
+			radiotype=7;
+		else if (radiotype == 4)	/* EvDO A */
+			radiotype=8;
+
+		if (state == 1 || state == 5) {	/* registered (home || roaming) */
+			char *line_bs;
+
+			count = 14;
+			/* returns SYSTYPE which we already have, ERIIND which
+			 * will be parsed in the unsol handler, CSQ, and 3GIND
+			 */
+			at_send_command("AT+HTC_SRV_STATUS?", NULL);
+			err = at_send_command_singleline("AT+HTC_BSINFO?", "+HTC_BSINFO:", &p_response_bs);
+			line_bs = p_response_bs->p_intermediates->line;
+			err = at_tok_start(&line_bs);
+			err = at_tok_nextstr(&line_bs, &responseStr[8]);
+			if (err < 0) goto error;
+			err = at_tok_nextstr(&line_bs, &responseStr[9]);
+			if (err < 0) goto error;
+			err = at_tok_nextstr(&line_bs, &responseStr[4]);
+			if (err < 0) goto error;
+			err = at_tok_nextstr(&line_bs, &responseStr[5]);
+			if (err < 0) goto error;
+			if (responseStr[5][0] == '+')
+				responseStr[5]++;
+			err = at_tok_nextstr(&line_bs, &responseStr[6]);
+			if (err < 0) goto error;
+			responseStr[7] = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
+			responseStr[10] = "128";	/* FIXME: Roaming Indicator */
+			responseStr[11] = "1";	/* FIXME: current system in PRL? */
+			responseStr[12] = eriPRL;
+			responseStr[13] = "-1";
+		}
 	}
-	sprintf(status, "%d", response[0]);
-	sprintf(nettype, "%d", response[3]);
+	sprintf(sstate, "%d", state);
+	sprintf(sradiotype, "%d", radiotype);
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, count*sizeof(char*));
+	at_response_free(p_response_bs);
 	at_response_free(p_response);
 
 	return;
@@ -2751,6 +2776,7 @@ static void  unsolicitedERI(const char *s) {
 
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
+	snprintf(eriPRL, sizeof(eriPRL), "%d", temp);
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
