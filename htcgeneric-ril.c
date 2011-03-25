@@ -147,6 +147,7 @@ static void setRadioState(RIL_RadioState newState);
 static int isgsm=0;
 static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
 static char erisystem[50];
+static char erishort[50];
 static char *callwaiting_num;
 static int countValidCalls=0;
 static int signalStrength[2];
@@ -1798,7 +1799,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	}
 	else {
 		response[0]=erisystem;
-		response[1]="Android";
+		response[1]=erishort;
 		response[2]="310260";
 	}
 
@@ -2786,6 +2787,13 @@ static void  unsolicitedERI(const char *s) {
 
 	if(strlen(newEri)<50)
 		strcpy(erisystem,newEri);
+	line = strchr(newEri, ' ');
+	if (line && line - newEri < 50) {
+		*line = '\0';
+		strcpy(erishort,newEri);
+	} else {
+		strcpy(erishort, erisystem);
+	}
 
 	free(origline);
 }
