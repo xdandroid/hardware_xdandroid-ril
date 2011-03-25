@@ -1709,7 +1709,8 @@ static void requestRegistrationState(int request, void *data,
 		else if (radiotype == -1)	/* unknown */
 			radiotype = 0;
 
-		if (state == 1 || state == 5) {	/* registered (home || roaming) */
+		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE &&
+			(state == 1 || state == 5)) {	/* registered (home || roaming) */
 			char *line_bs;
 
 			count = 14;
