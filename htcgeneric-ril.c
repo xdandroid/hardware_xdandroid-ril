@@ -1420,7 +1420,7 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
 			if (err < 0) goto error;
 		} else {
-			err = at_send_command("AT+ENCSQ=1;+ENBSINFO=1", NULL);
+			err = at_send_command("AT+ENCSQ=1", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT+HTCCTZR=1", NULL);
 			if (err < 0) goto error;
@@ -1462,7 +1462,7 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
 			if (err < 0) goto error;
 		} else {
-			err = at_send_command("AT+ENCSQ=0;+ENBSINFO=0", NULL);
+			err = at_send_command("AT+ENCSQ=0", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT+HTCCTZR=2", NULL);
 			if (err < 0) goto error;
@@ -1716,8 +1716,11 @@ static void requestRegistrationState(int request, void *data,
 			count = 14;
 			/* returns SYSTYPE which we already have, ERIIND which
 			 * will be parsed in the unsol handler, CSQ, and 3GIND
+			 * We want the ERIIND...
 			 */
-			at_send_command("AT+HTC_SRV_STATUS?", NULL);
+			if (!eriPRL[0])
+				at_send_command("AT+HTC_SRV_STATUS?", NULL);
+
 			err = at_send_command_singleline("AT+HTC_BSINFO?", "+HTC_BSINFO:", &p_response_bs);
 			line_bs = p_response_bs->p_intermediates->line;
 			err = at_tok_start(&line_bs);
@@ -4516,7 +4519,6 @@ static void initializeCallback(void *param)
 		if (is_world_cdma)
 			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
 		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT+ENBSINFO=1", NULL);
 		at_send_command("AT@HTCPDPFD=0", NULL);
 	}
 	/* assume radio is off on error */
