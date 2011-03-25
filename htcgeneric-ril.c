@@ -1473,7 +1473,7 @@ static void requestRegistrationState(int request, void *data,
 	int i;
 	int count = 4;
 	int fd;
-	int dataCall = 0;
+	int cdma_systype = 0;
 	char status[3];
 	char nettype[3];
 	char *responseStr[4] = {status, NULL, NULL, nettype};
@@ -1495,6 +1495,7 @@ static void requestRegistrationState(int request, void *data,
 			goto error;
 		}
 	} else {
+#if 0
 		/* "Regular" CDMA (like Diam/Raph) uses AT+COPS, world phone CDMA uses AT+HTC_SRV_STATUS */
 		if (is_world_cdma)
 			cmd = "AT+HTC_SRV_STATUS?";
@@ -1502,6 +1503,19 @@ static void requestRegistrationState(int request, void *data,
 			cmd = "AT+COPS?";
 
 		prefix= "$HTC_SYSTYPE";
+#else
+		cmd = "AT+HTC_GETSYSTYPE=0";
+		prefix= "+HTC_GETSYSTYPE:";
+		err = at_send_command_singleline(cmd, prefix, &p_response);
+		if(err==0) {
+			line = p_response->p_intermediates->line;
+			err = at_tok_start(&line);
+			if(err==0)
+				err = at_tok_nextint(&line, &cdma_systype);
+		}
+		cmd = "AT+CREG?";
+		prefix = "+CREG:";
+#endif
 	}
 	err = 1;
 	for (i=0;i<4 && err != 0;i++)
@@ -1513,164 +1527,164 @@ static void requestRegistrationState(int request, void *data,
 
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
-	if (isgsm) {
-		/* Ok you have to be careful here
-		 * The solicited version of the CREG response is
-		 * +CREG: n, stat, [lac, cid]
-		 * and the unsolicited version is
-		 * +CREG: stat, [lac, cid]
-		 * The <n> parameter is basically "is unsolicited creg on?"
-		 * which it should always be
-		 *
-		 * Now we should normally get the solicited version here,
-		 * but the unsolicited version could have snuck in
-		 * so we have to handle both
-		 *
-		 * Also since the LAC and CID are only reported when registered,
-		 * we can have 1, 2, 3, or 4 arguments here
-		 *
-		 * finally, a +CGREG: answer may have a fifth value that corresponds
-		 * to the network type, as in;
-		 *
-		 *   +CGREG: n, stat [,lac, cid [,networkType]]
-		 */
+	/* Ok you have to be careful here
+	 * The solicited version of the CREG response is
+	 * +CREG: n, stat, [lac, cid]
+	 * and the unsolicited version is
+	 * +CREG: stat, [lac, cid]
+	 * The <n> parameter is basically "is unsolicited creg on?"
+	 * which it should always be
+	 *
+	 * Now we should normally get the solicited version here,
+	 * but the unsolicited version could have snuck in
+	 * so we have to handle both
+	 *
+	 * Also since the LAC and CID are only reported when registered,
+	 * we can have 1, 2, 3, or 4 arguments here
+	 *
+	 * finally, a +CGREG: answer may have a fifth value that corresponds
+	 * to the network type, as in;
+	 *
+	 *   +CGREG: n, stat [,lac, cid [,networkType]]
+	 */
 
-		/* count number of commas */
-		commas = 0;
-		for (p = line ; *p != '\0' ;p++) {
-			if (*p == ',') commas++;
-		}
+	/* count number of commas */
+	commas = 0;
+	for (p = line ; *p != '\0' ;p++) {
+		if (*p == ',') commas++;
+	}
 
-		switch (commas) {
-			case 0: /* +CREG: <stat> */
-				err = at_tok_nextint(&line, &response[0]);
-				if (err < 0) goto error;
-				break;
+	switch (commas) {
+		case 0: /* +CREG: <stat> */
+			err = at_tok_nextint(&line, &response[0]);
+			if (err < 0) goto error;
+			break;
 
-			case 1: /* +CREG: <n>, <stat> */
-				err = at_tok_nextint(&line, &skip);
-				if (err < 0) goto error;
-				err = at_tok_nextint(&line, &response[0]);
-				if (err < 0) goto error;
-				break;
+		case 1: /* +CREG: <n>, <stat> */
+			err = at_tok_nextint(&line, &skip);
+			if (err < 0) goto error;
+			err = at_tok_nextint(&line, &response[0]);
+			if (err < 0) goto error;
+			break;
 
-			case 2: /* +CREG: <stat>, <lac>, <cid> */
-				err = at_tok_nextint(&line, &response[0]);
-				if (err < 0) goto error;
-				p = line;
-				err = at_tok_nexthexint(&line, &response[1]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[1]);
-				p = line;
-				err = at_tok_nexthexint(&line, &response[2]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[2]);
-				break;
-			case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
-				err = at_tok_nextint(&line, &skip);
-				if (err < 0) goto error;
-				err = at_tok_nextint(&line, &response[0]);
-				if (err < 0) goto error;
-				p = line;
-				err = at_tok_nexthexint(&line, &response[1]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[1]);
-				p = line;
-				err = at_tok_nexthexint(&line, &response[2]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[2]);
+		case 2: /* +CREG: <stat>, <lac>, <cid> */
+			err = at_tok_nextint(&line, &response[0]);
+			if (err < 0) goto error;
+			p = line;
+			err = at_tok_nexthexint(&line, &response[1]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[1]);
+			p = line;
+			err = at_tok_nexthexint(&line, &response[2]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[2]);
+			break;
+		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
+			err = at_tok_nextint(&line, &skip);
+			if (err < 0) goto error;
+			err = at_tok_nextint(&line, &response[0]);
+			if (err < 0) goto error;
+			p = line;
+			err = at_tok_nexthexint(&line, &response[1]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[1]);
+			p = line;
+			err = at_tok_nexthexint(&line, &response[2]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[2]);
 
-				/* Hack for broken +CGREG responses which don't return the network type */
-				if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE) {
-					ATResponse *p_response_op = NULL;
-					err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response_op);
-					/* We need to get the 4th return param */
-					int commas_op;
-					commas_op = 0;
-					char *p_op, *line_op;
-					line_op = p_response_op->p_intermediates->line;
+			/* Hack for broken +CGREG responses which don't return the network type */
+			if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE) {
+				ATResponse *p_response_op = NULL;
+				err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response_op);
+				/* We need to get the 4th return param */
+				int commas_op;
+				commas_op = 0;
+				char *p_op, *line_op;
+				line_op = p_response_op->p_intermediates->line;
 
-					for (p_op = line_op ; *p_op != '\0' ;p_op++) {
-						if (*p_op == ',') commas_op++;
-					}
-
-					if (commas_op == 3) {
-						err = at_tok_start(&line_op);
-						err = at_tok_nextint(&line_op, &skip);
-						if (err < 0) goto error;
-						err = at_tok_nextint(&line_op, &skip);
-						if (err < 0) goto error;
-						err = at_tok_nextint(&line_op, &skip);
-						if (err < 0) goto error;
-						err = at_tok_nextint(&line_op, &response[3]);
-						if (err < 0) goto error;
-						/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
-						switch(response[3]) {
-							/* GSM/GSM Compact - aka GPRS */
-							case 0:
-							case 1:
-								response[3] = 1;
-								break;
-								/* EGPRS - aka EDGE */
-							case 3:
-								response[3] = 2;
-								break;
-								/* UTRAN - UMTS aka 3G */
-							case 2:
-							case 7:
-								response[3] = 3;
-								break;
-								/* UTRAN with HSDPA */
-							case 4:
-								response[3] = 9;
-								break;
-								/* UTRAN with HSUPA */
-							case 5:
-								response[3] = 10;
-								break;
-								/* UTRAN with HSPA (HSDPA and HSUPA) */
-							case 6:
-								response[3] = 11;
-								break;
-						}
-					}
-
-					at_response_free(p_response_op);
+				for (p_op = line_op ; *p_op != '\0' ;p_op++) {
+					if (*p_op == ',') commas_op++;
 				}
-				break;
-				/* special case for CGREG, there is a fourth parameter
-				 * that is the network type (unknown/gprs/edge/umts)
-				 */
-			case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
-				err = at_tok_nextint(&line, &skip);
-				if (err < 0) goto error;
-				err = at_tok_nextint(&line, &response[0]);
-				if (err < 0) goto error;
-				p = line;
-				err = at_tok_nexthexint(&line, &response[1]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[1]);
-				p = line;
-				err = at_tok_nexthexint(&line, &response[2]);
-				if (err < 0) goto error;
-				at_tok_nextstr(&p, &responseStr[2]);
-				err = at_tok_nexthexint(&line, &response[3]);
-				if (err < 0) goto error;
-				/* the network type really ought to be decoded as above, but
-				 * none of our devices actually get here so far
-				 */
-				break;
-			default:
-				goto error;
-		}
-	} else { //CDMA
-		if (request == RIL_REQUEST_GPRS_REGISTRATION_STATE) {
-			err = at_tok_nextint(&line, &response[3]);
-			if (response[3] < 1)
-				response[3] = 1;
-			if (response[3] > 3)
-				response[3] = 3;
-		}
+
+				if (commas_op == 3) {
+					err = at_tok_start(&line_op);
+					err = at_tok_nextint(&line_op, &skip);
+					if (err < 0) goto error;
+					err = at_tok_nextint(&line_op, &skip);
+					if (err < 0) goto error;
+					err = at_tok_nextint(&line_op, &skip);
+					if (err < 0) goto error;
+					err = at_tok_nextint(&line_op, &response[3]);
+					if (err < 0) goto error;
+					/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
+					switch(response[3]) {
+						/* GSM/GSM Compact - aka GPRS */
+						case 0:
+						case 1:
+							response[3] = 1;
+							break;
+							/* EGPRS - aka EDGE */
+						case 3:
+							response[3] = 2;
+							break;
+							/* UTRAN - UMTS aka 3G */
+						case 2:
+						case 7:
+							response[3] = 3;
+							break;
+							/* UTRAN with HSDPA */
+						case 4:
+							response[3] = 9;
+							break;
+							/* UTRAN with HSUPA */
+						case 5:
+							response[3] = 10;
+							break;
+							/* UTRAN with HSPA (HSDPA and HSUPA) */
+						case 6:
+							response[3] = 11;
+							break;
+					}
+				}
+
+				at_response_free(p_response_op);
+			}
+			break;
+			/* special case for CGREG, there is a fourth parameter
+			 * that is the network type (unknown/gprs/edge/umts)
+			 */
+		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
+			err = at_tok_nextint(&line, &skip);
+			if (err < 0) goto error;
+			err = at_tok_nextint(&line, &response[0]);
+			if (err < 0) goto error;
+			p = line;
+			err = at_tok_nexthexint(&line, &response[1]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[1]);
+			p = line;
+			err = at_tok_nexthexint(&line, &response[2]);
+			if (err < 0) goto error;
+			at_tok_nextstr(&p, &responseStr[2]);
+			err = at_tok_nexthexint(&line, &response[3]);
+			if (err < 0) goto error;
+			/* the network type really ought to be decoded as above, but
+			 * none of our devices actually get here so far
+			 */
+			break;
+		default:
+			goto error;
+	}
+
+	if (!isgsm) {
+		if (cdma_systype == 2)	/* 1xRTT */
+			cdma_systype=6;
+		else if (cdma_systype == 3)	/* EvDO 0 */
+			cdma_systype=7;
+		else if (cdma_systype == 4)	/* EvDO A */
+			cdma_systype=8;
+		response[3] = cdma_systype;
 	}
 	sprintf(status, "%d", response[0]);
 	sprintf(nettype, "%d", response[3]);
