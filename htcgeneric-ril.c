@@ -159,6 +159,9 @@ static char eriPRL[4];
 static int got_state_change=0;
 static int do_loc_updates=1;
 static int regstate;
+static int gprs_rtype=-1;
+static int gsm_selmode=-1;
+static char imei[16+4];
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -712,24 +715,28 @@ static void requestQueryNetworkSelectionMode(
 	}
 
 	if(isgsm) { //this command conflicts with the network status command
-		err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
+		if (gsm_selmode == -1) {
+			err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
 
-		if (err < 0 || p_response->success == 0) {
-			goto error;
-		}
+			if (err < 0 || p_response->success == 0) {
+				goto error;
+			}
 
-		line = p_response->p_intermediates->line;
+			line = p_response->p_intermediates->line;
 
-		err = at_tok_start(&line);
+			err = at_tok_start(&line);
 
-		if (err < 0) {
-			goto error;
-		}
+			if (err < 0) {
+				goto error;
+			}
 
-		err = at_tok_nextint(&line, &response);
+			err = at_tok_nextint(&line, &response);
 
-		if (err < 0) {
-			goto error;
+			if (err < 0) {
+				goto error;
+			}
+		} else {
+			response = gsm_selmode;
 		}
 	}
 
@@ -1618,7 +1625,9 @@ static void requestRegistrationState(int request, void *data,
 			at_tok_nextstr(&p, &responseStr[2]);
 
 			/* Hack for broken +CGREG responses which don't return the network type */
-			if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE) {
+			if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE &&
+				(regstate == REG_HOME || regstate == REG_ROAM) &&
+				gprs_rtype == -1) {
 				ATResponse *p_response_op = NULL;
 				err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response_op);
 				/* We need to get the 4th return param */
@@ -1641,6 +1650,7 @@ static void requestRegistrationState(int request, void *data,
 					if (err < 0) goto error;
 					err = at_tok_nextint(&line_op, &radiotype);
 					if (err < 0) goto error;
+					gprs_rtype = radiotype;
 				}
 
 				at_response_free(p_response_op);
@@ -1664,6 +1674,7 @@ static void requestRegistrationState(int request, void *data,
 			at_tok_nextstr(&p, &responseStr[2]);
 			err = at_tok_nexthexint(&line, &radiotype);
 			if (err < 0) goto error;
+			gprs_rtype = radiotype;
 			break;
 		default:
 			goto error;
@@ -1671,6 +1682,8 @@ static void requestRegistrationState(int request, void *data,
 
 	if (isgsm) {
 		/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
+		if (radiotype == -1 && (regstate == REG_HOME || regstate == REG_ROAM))
+			radiotype = gprs_rtype;
 		switch(radiotype) {
 			/* GSM/GSM Compact - aka GPRS */
 			case 0:
@@ -1801,7 +1814,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 			err = at_tok_start(&line);
 			if (err < 0) goto error;
 
-			err = at_tok_nextint(&line, &skip);
+			err = at_tok_nextint(&line, &gsm_selmode);
 			if (err < 0) goto error;
 
 			// If we're unregistered, we may just get
@@ -1822,6 +1835,10 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 
 			err = at_tok_nextstr(&line, &(response[i]));
 			if (err < 0) goto error;
+
+			if (at_tok_hasmore(&line)) {
+				at_tok_nextint(&line, &gprs_rtype);
+			}
 		}
 
 		if (i < 3) {
@@ -2499,6 +2516,8 @@ static void unsolicitedCREG(const char * s)
 				regstate = i;
 		}
 	}
+	gprs_rtype = -1;
+	gsm_selmode = -1;
 }
 
 static void requestNotSupported(RIL_Token t, int request)
@@ -3312,49 +3331,119 @@ error:
 	at_response_free(p_response);
 }
 
-static void requestGetIMEISV(RIL_Token t)
+static int getIMEISV()
+{
+	int err;
+	ATResponse *p_response = NULL;
+	if (!imei[0]) {
+		err = at_send_command_numeric("AT+CGSN", &p_response);
+		if (err < 0 || p_response->success == 0)
+			return -1;
+		strncpy(imei, p_response->p_intermediates->line, 17);
+		imei[18] = imei[17];
+		imei[17] = imei[16];
+		imei[16] = imei[15];
+		imei[15] = '\0';
+	}
+	at_response_free(p_response);
+	return 0;
+}
+
+/* Return 1 if ESN, 0 if MEID, -1 on error */
+static int getESNMEID(int munge)
 {
 	int err = 0;
 	ATResponse *p_response = NULL;
-	if(isgsm) {
-		err = at_send_command_numeric("AT+CGSN", &p_response);
-		if (err < 0 || p_response->success == 0) {
-			RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-		} else {
-			RIL_onRequestComplete(t, RIL_E_SUCCESS,
-					p_response->p_intermediates->line, sizeof(char *));
-		}
+	char *line;
+
+	/* On world phone, AT+GSN returns the IMEI in decimal. This can be returned directly.
+	 * On regular CDMA, AT+GSN returns the ESN in hex. This has to be converted to decimal.
+	 */
+
+	err = at_send_command_numeric("AT+GSN", &p_response);
+	if (err < 0 || p_response->success == 0)
+		return -1;
+
+	line = p_response->p_intermediates->line;
+	if (line[1] == 'x') {
+		/* Hex ESN: regular CDMA */
+		unsigned long int l;
+		l = (unsigned long)hex2int(line[9]) + (unsigned long)16*hex2int(line[8])
+			+ (unsigned long)256*hex2int(line[7]) + (unsigned long)4096*hex2int(line[6])
+			+ (unsigned long)65536*hex2int(line[5]) + (unsigned long)1048576*hex2int(line[4])
+			+ (unsigned long)16777216*hex2int(line[3]) + (unsigned long)268435456*hex2int(line[2]);
+		sprintf(imei,"%015lu",l);
+		imei[16] = '\0';
+		err = 1;
 	} else {
-		/* On world phone, AT+GSN returns the IMEI in decimal. This can be returned directly.
-		 * On regular CDMA, AT+GSN returns the ESN in hex. This has to be converted to decimal.
-		 */
-
-		err = at_send_command_numeric("AT+GSN", &p_response);
-		if (err < 0 || p_response->success == 0) {
-			RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-		} else {
-			char * line = p_response->p_intermediates->line;
-			if (line[1] == 'x') {
-				/* Hex ESN: regular CDMA */
-				unsigned long int imei;
-				char * imeiString;
-				imei = (unsigned long)hex2int(line[9]) + (unsigned long)16*hex2int(line[8])
-					+ (unsigned long)256*hex2int(line[7]) + (unsigned long)4096*hex2int(line[6])
-					+ (unsigned long)65536*hex2int(line[5]) + (unsigned long)1048576*hex2int(line[4])
-					+ (unsigned long)16777216*hex2int(line[3]) + (unsigned long)268435456*hex2int(line[2]);
-				asprintf(&imeiString,"%015lu",imei);
-				RIL_onRequestComplete(t, RIL_E_SUCCESS,imeiString, sizeof(char *));
-				free(imeiString);
-			} else {
-				/* Decimal IMEI: world phone in CDMA mode */
-				RIL_onRequestComplete(t, RIL_E_SUCCESS,
-						p_response->p_intermediates->line, sizeof(char *));
-			}
+		/* Decimal IMEI: world phone in CDMA mode */
+		strncpy(imei, line, 17);
+		if (munge) {
+			imei[18] = imei[17];
+			imei[17] = imei[16];
+			imei[16] = imei[15];
+			imei[15] = '\0';
 		}
-
+		err = 0;
 	}
 	at_response_free(p_response);
+	return err;
+}
+
+static void requestGetIMEISV(int request, RIL_Token t)
+{
+	int err;
+	char *resp;
+
+	if(isgsm)
+		err = getIMEISV();
+	else
+		err = getESNMEID(1);
+
+	if (err < 0) {
+		RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	} else {
+		if (request == RIL_REQUEST_GET_IMEI)
+			resp = imei;
+		else
+			resp = imei+16;
+		RIL_onRequestComplete(t, RIL_E_SUCCESS, resp, sizeof(resp));
+	}
+}
+
+static void requestDeviceIdentity(RIL_Token t)
+{
+	int err;
+	char *resp[4], *blank="";
+
+	if (isgsm) {
+		err = getIMEISV();
+		if (err < 0)
+			goto error;
+		resp[0] = imei;
+		resp[1] = imei+16;
+		resp[2] = blank;
+		resp[3] = blank;
+	} else {
+		err = getESNMEID(0);
+		if (err < 0)
+			goto error;
+		resp[0] = blank;
+		resp[1] = blank;
+		if (err) {
+			resp[2] = imei;
+			resp[3] = blank;
+		} else {
+			resp[2] = blank;
+			resp[3] = imei;
+			imei[14] = '\0';
+		}
+	}
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, resp, sizeof(resp));
 	return;
+
+error:
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestCancelUSSD(RIL_Token t)
@@ -3615,6 +3704,10 @@ error:
 	free(intdata);
 	free(optInfo);
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
+static void requestCdmaSetSubscription(void *data, size_t datalen, RIL_Token t) {
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
 }
 
 static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) {
@@ -3909,7 +4002,11 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 		case RIL_REQUEST_GET_IMEI:
 		case RIL_REQUEST_GET_IMEISV:
-			requestGetIMEISV(t);
+			requestGetIMEISV(request, t);
+			break;
+
+		case RIL_REQUEST_DEVICE_IDENTITY:
+			requestDeviceIdentity(t);
 			break;
 
 		case RIL_REQUEST_SIM_IO:
@@ -4068,6 +4165,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestNeighboringCellIds(data, datalen, t);
 			break;
 
+		case RIL_REQUEST_CDMA_SET_SUBSCRIPTION:
+			requestCdmaSetSubscription(data, datalen, t);
+			break;
+
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
 			requestNotSupported(t, request);
 			break;
@@ -4089,10 +4190,6 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			break;
 
 		case RIL_REQUEST_GSM_SMS_BROADCAST_ACTIVATION:
-			requestNotSupported(t, request);
-			break;
-
-		case RIL_REQUEST_DEVICE_IDENTITY:
 			requestNotSupported(t, request);
 			break;
 
@@ -4134,7 +4231,7 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-	return "HTC Vogue Community RIL 1.6.0 [xda]";
+	return "HTC Vogue Community RIL 1.6.1 [xda]";
 }
 
 	static void
