@@ -2481,6 +2481,26 @@ error:
 	return;
 }
 
+static void unsolicitedCREG(const char * s)
+{
+	int i;
+	char *colon;
+
+	/* Format is +CREG: <state>,[<lac>,<cid>] */
+	colon = strchr(s, ':');
+	if (colon) {
+		colon++;
+		colon++;
+		if (*colon == '0') {
+			regstate = 0;
+		} else {
+			i = atoi(colon);
+			if (i)
+				regstate = i;
+		}
+	}
+}
+
 static void requestNotSupported(RIL_Token t, int request)
 {
 	LOGD("Request %d is unsupported", request);
@@ -4599,6 +4619,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			|| strStartsWith(s,"$HTC_SYSTYPE:")) {
 		if (!got_state_change) {
 			got_state_change=1;
+			if (s[0] == '+')
+				unsolicitedCREG(s);
 			RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
 				NULL, 0);
