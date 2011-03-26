@@ -153,6 +153,7 @@ static int countValidCalls=0;
 static int signalStrength[2];
 static char eriPRL[4];
 static int got_state_change=0;
+static int do_loc_updates=1;
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -1414,8 +1415,12 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT@HTCCSQ=1", NULL);
 			if (err < 0) goto error;*/
 
-			err = at_send_command("AT+ENCSQ=1;+CREG=2", NULL);
+			err = at_send_command("AT+ENCSQ=1", NULL);
 			if (err < 0) goto error;
+			if (do_loc_updates) {
+				err = at_send_command("AT+CREG=2", NULL);
+				if (err < 0) goto error;
+			}
 			err = at_send_command("AT+HTCCTZR=1", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
@@ -1456,8 +1461,12 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 
 			err = at_send_command("AT+HTCPDPIDLE", NULL);
 			if (err < 0) goto error;
-			err = at_send_command("AT+ENCSQ=0;+CREG=1", NULL);
+			err = at_send_command("AT+ENCSQ=0", NULL);
 			if (err < 0) goto error;
+			if (do_loc_updates) {
+				err = at_send_command("AT+CREG=1", NULL);
+				if (err < 0) goto error;
+			}
 			err = at_send_command("AT+HTCCTZR=2", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
@@ -2982,10 +2991,11 @@ static void requestExplicitCallTransfer(RIL_Token t)
 static void requestSetLocationUpdates(void *data, size_t datalen, RIL_Token t)
 {
 	int err = 0;
-	int updates = 0;
+	int updates;
 	char cmd[sizeof("AT+CREG=1")];
-	updates = ((int *)data)[0] == 1? 2 : 1;
+	do_loc_updates = ((int *)data)[0] == 1;
 
+	updates = do_loc_updates ? 2 : 1;
 	sprintf(cmd, "AT+CREG=%d", updates);
 
 	err = at_send_command(cmd,NULL);
@@ -3602,6 +3612,9 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 
 	RIL_NeighboringCell **pp_cellIds;
 	RIL_NeighboringCell *p_cellIds;
+
+	/* don't bother */
+	if (!do_loc_updates) goto error;
 
 	pp_cellIds = (RIL_NeighboringCell **)alloca(sizeof(RIL_NeighboringCell *));
 	p_cellIds = (RIL_NeighboringCell *)alloca(sizeof(RIL_NeighboringCell));
