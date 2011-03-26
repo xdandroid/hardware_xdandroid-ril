@@ -60,6 +60,10 @@
 #define WORKAROUND_FAKE_CGEV 1
 #endif
 
+/* valid registration states */
+#define REG_HOME	1
+#define REG_ROAM	5
+
 typedef enum {
 	SIM_ABSENT = 0,
 	SIM_NOT_READY = 1,
@@ -154,6 +158,7 @@ static int signalStrength[2];
 static char eriPRL[4];
 static int got_state_change=0;
 static int do_loc_updates=1;
+static int regstate;
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -700,6 +705,11 @@ static void requestQueryNetworkSelectionMode(
 	ATResponse *p_response = NULL;
 	int response = 0;
 	char *line;
+
+	if(regstate != REG_HOME && regstate != REG_ROAM) {
+		RIL_onRequestComplete(t, RIL_E_OP_NOT_ALLOWED_BEFORE_REG_TO_NW, NULL, 0);
+		return;
+	}
 
 	if(isgsm) { //this command conflicts with the network status command
 		err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
@@ -1490,7 +1500,7 @@ static void requestRegistrationState(int request, void *data,
 	int i;
 	int count = 4;
 	int fd;
-	int state = 0, radiotype = -1;
+	int radiotype = -1;
 	char sstate[3];
 	char sradiotype[3];
 	char *responseStr[14] = {sstate, NULL, NULL, sradiotype};
@@ -1570,19 +1580,19 @@ static void requestRegistrationState(int request, void *data,
 
 	switch (commas) {
 		case 0: /* +CREG: <stat> */
-			err = at_tok_nextint(&line, &state);
+			err = at_tok_nextint(&line, &regstate);
 			if (err < 0) goto error;
 			break;
 
 		case 1: /* +CREG: <n>, <stat> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &state);
+			err = at_tok_nextint(&line, &regstate);
 			if (err < 0) goto error;
 			break;
 
 		case 2: /* +CREG: <stat>, <lac>, <cid> */
-			err = at_tok_nextint(&line, &state);
+			err = at_tok_nextint(&line, &regstate);
 			if (err < 0) goto error;
 			p = line;
 			err = at_tok_nexthexint(&line, &skip);
@@ -1596,7 +1606,7 @@ static void requestRegistrationState(int request, void *data,
 		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &state);
+			err = at_tok_nextint(&line, &regstate);
 			if (err < 0) goto error;
 			p = line;
 			err = at_tok_nexthexint(&line, &skip);
@@ -1642,7 +1652,7 @@ static void requestRegistrationState(int request, void *data,
 		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
 			err = at_tok_nextint(&line, &skip);
 			if (err < 0) goto error;
-			err = at_tok_nextint(&line, &state);
+			err = at_tok_nextint(&line, &regstate);
 			if (err < 0) goto error;
 			p = line;
 			err = at_tok_nexthexint(&line, &skip);
@@ -1706,7 +1716,7 @@ static void requestRegistrationState(int request, void *data,
 			radiotype = 0;
 
 		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE &&
-			(state == 1 || state == 5)) {	/* registered (home || roaming) */
+			(regstate == REG_HOME || regstate == REG_ROAM)) {
 			char *line_bs;
 
 			count = 14;
@@ -1739,7 +1749,7 @@ static void requestRegistrationState(int request, void *data,
 			responseStr[13] = "-1";
 		}
 	}
-	sprintf(sstate, "%d", state);
+	sprintf(sstate, "%d", regstate);
 	sprintf(sradiotype, "%d", radiotype);
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, count*sizeof(char*));
@@ -1759,11 +1769,16 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	int i;
 	int skip;
 	ATLine *p_cur;
+	ATResponse *p_response = NULL;
 	char *response[3];
 
 	memset(response, 0, sizeof(response));
 
-	ATResponse *p_response = NULL;
+	if(regstate != REG_HOME && regstate != REG_ROAM) {
+		RIL_onRequestComplete(t, RIL_E_OP_NOT_ALLOWED_BEFORE_REG_TO_NW, NULL, 0);
+		return;
+	}
+
 	if(isgsm) {
 		err = at_send_command_multiline(
 				"AT+COPS=3,0;+COPS?;+COPS=3,1;+COPS?;+COPS=3,2;+COPS?",
