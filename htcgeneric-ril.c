@@ -152,6 +152,7 @@ static char *callwaiting_num;
 static int countValidCalls=0;
 static int signalStrength[2];
 static char eriPRL[4];
+static int got_state_change=0;
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -1500,6 +1501,8 @@ static void requestRegistrationState(int request, void *data,
 	char sstate[3];
 	char sradiotype[3];
 	char *responseStr[14] = {sstate, NULL, NULL, sradiotype};
+
+	got_state_change = 0;
 
 	if(isgsm) {
 		if (request == RIL_REQUEST_REGISTRATION_STATE) {
@@ -4576,11 +4579,14 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			|| strStartsWith(s,"@HTCCSQ:")) {
 		unsolicitedRSSI(s);
 	} else if (strStartsWith(s,"+CREG:")
-			|| strStartsWith(s,"+CGREG:"))
-		/*	|| strStartsWith(s,"$HTC_SYSTYPE:")) */{
-		RIL_onUnsolicitedResponse (
+			|| strStartsWith(s,"+CGREG:")
+			|| strStartsWith(s,"$HTC_SYSTYPE:")) {
+		if (!got_state_change) {
+			got_state_change=1;
+			RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
 				NULL, 0);
+		}
 /*		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); */
 	} else if (strStartsWith(s, "+CMT:")) {
 		LOGD("GSM_PDU=%s\n",sms_pdu);
