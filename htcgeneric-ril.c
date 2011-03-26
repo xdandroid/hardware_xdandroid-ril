@@ -3612,12 +3612,15 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	RIL_NeighboringCell **pp_cellIds;
 	RIL_NeighboringCell *p_cellIds;
 
-	/* don't bother */
-	if (!do_loc_updates) goto error;
-
 	pp_cellIds = (RIL_NeighboringCell **)alloca(sizeof(RIL_NeighboringCell *));
 	p_cellIds = (RIL_NeighboringCell *)alloca(sizeof(RIL_NeighboringCell));
 	pp_cellIds[0]=p_cellIds;
+
+	p_cellIds->cid = "";
+	p_cellIds->rssi = 0;
+
+	/* don't bother */
+	if (!do_loc_updates) goto done;
 
 	for (i=0;i<4 && err != 0;i++) {
 		err = at_send_command_singleline("AT+CREG?", "+CREG:", &p_response);
@@ -3701,6 +3704,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			goto error;
 	}
 
+done:
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, sizeof(*pp_cellIds));
 	at_response_free(p_response);
 	return;
