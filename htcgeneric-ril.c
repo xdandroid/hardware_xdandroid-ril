@@ -4231,7 +4231,9 @@ static void onCancel (RIL_Token t)
 
 static const char * getVersion(void)
 {
-	return "HTC Vogue Community RIL 1.6.1 [xda]";
+	return "HTC Vogue Community RIL hyc "
+#include "gitver.h"
+	;
 }
 
 	static void

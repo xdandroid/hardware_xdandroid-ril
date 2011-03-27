@@ -5,6 +5,24 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
+LOCAL_target := lib
+
+ifeq ($(LOCAL_target),lib)
+  LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+  LOCAL_MODULE := libhtcgeneric-ril
+else
+  LOCAL_MODULE_CLASS := EXECUTABLES
+  LOCAL_MODULE:= htcgeneric-ril
+endif
+
+intermediates:= $(local-intermediates-dir)
+GEN := $(intermediates)/gitver.h
+$(GEN): PRIVATE_CUSTOM_TOOL = git --git-dir=$(<D) log -1 --format=format:'"%h %ci"' > $@
+$(GEN):	$(LOCAL_PATH)/.git/index
+	$(transform-generated-source)
+
+LOCAL_GENERATED_SOURCES += $(GEN)
+
 LOCAL_SRC_FILES:= \
     htcgeneric-ril.c \
     atchannel.c \
@@ -15,7 +33,7 @@ LOCAL_SRC_FILES:= \
     gsm.c
 
 LOCAL_SHARED_LIBRARIES := \
-	libcutils libutils libril
+	libril
 
 	# for asprinf
 LOCAL_CFLAGS := -D_GNU_SOURCE
@@ -36,19 +54,15 @@ endif
 
 LOCAL_MODULE_TAGS := optional
 
-ifeq (foo,foo)
+ifeq ($(LOCAL_target),lib)
   #build shared library
   LOCAL_SHARED_LIBRARIES += \
 	libcutils libutils
   LOCAL_LDLIBS += -lpthread 
   LOCAL_CFLAGS += -DRIL_SHLIB 
-  LOCAL_MODULE:= libhtcgeneric-ril
   LOCAL_PRELINK_MODULE := false
   include $(BUILD_SHARED_LIBRARY)
 else
   #build executable
-  LOCAL_SHARED_LIBRARIES += \
-	libril
-  LOCAL_MODULE:= htcgeneric-ril
   include $(BUILD_EXECUTABLE)
 endif
