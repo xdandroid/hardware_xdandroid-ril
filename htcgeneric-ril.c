@@ -818,7 +818,7 @@ static void requestGetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 {
 	int err;
 	ATResponse *p_response = NULL;
-	int response = 0;
+	int response = 0, r2;
 	char *line;
 
 	err = at_send_command_singleline("AT+CGAATT?", "+CGAATT:", &p_response);
@@ -840,13 +840,24 @@ static void requestGetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	if (err < 0) {
 		goto error;
 	}
-	err = at_tok_nextint(&line, &response);
+	err = at_tok_nextint(&line, &r2);
 	if (err < 0) {
 		goto error;
 	}
 	err = at_tok_nextint(&line, &response);
 	if (err < 0) {
 		goto error;
+	}
+	response += r2 * 10;
+	switch(response) {
+	case 20: response = 0; break;
+	case 11: response = 1; break;
+	case 22: response = 2; break;
+	case 13: response = 3; break;
+	case 16: response = 4; break;
+	case 14: response = 5; break;
+	case 15: response = 6; break;
+	case 10: response = 7; break;
 	}
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
 	at_response_free(p_response);
@@ -883,14 +894,26 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	sprintf(cmd, "AT+XRAT=%s", at_rat);
 #else
 	LOGD("In requestSetPreferredNetworkType RAPH");
-	if (rat < 0 || rat > 7) goto error;
+	/* Note: the G1 ril uses these values. Don't know why case 0 and 2
+	 * use '2' in the middle value.
+	 */
+	switch (rat) {
+		case 0: at_rat = "2,2,0"; break;/* Dual Mode - WCDMA preferred*/
+		case 1: at_rat = "2,1,1"; break;  /* GSM only */
+		case 2: at_rat = "2,2,2"; break;  /* WCDMA only */
+		case 3: at_rat = "2,1,3"; break;  /* GSM auto (PRL) */
+		case 4: at_rat = "2,1,6"; break;  /* CDMA auto (PRL) */
+		case 5: at_rat = "2,1,4"; break;  /* CDMA only */
+		case 6: at_rat = "2,1,5"; break;  /* EvDO only */
+		case 7: at_rat = "2,1,0"; break;  /* GSM/CDMA auto (PRL) */
+	}
 
 	/* For some reason, without the bandset command, the CGAATT
 	one fails. [mdrobnak] */
 	err = at_send_command("AT+BANDSET=0", NULL);
 	if (err < 0) goto error;
 
-	sprintf(cmd, "AT+CGAATT=2,1,%d", rat);
+	sprintf(cmd, "AT+CGAATT=%s", at_rat);
 
 #endif /* USE_IDCC_MODEM */
 	err = at_send_command(cmd, &p_response);
