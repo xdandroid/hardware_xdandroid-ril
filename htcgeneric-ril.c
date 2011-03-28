@@ -33,6 +33,7 @@
 #include <getopt.h>
 #include <sys/socket.h>
 #include <cutils/sockets.h>
+#include <cutils/properties.h>
 #include <termios.h>
 
 #define LOG_NDEBUG 0
@@ -150,6 +151,7 @@ static void setRadioState(RIL_RadioState newState);
 
 static int isgsm=0;
 static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
+static int cdma_phone=0;	/* Set to 1 if Android is set to CDMA mode */
 static char erisystem[50];
 static char erishort[50];
 static char *callwaiting_num;
@@ -162,6 +164,9 @@ static int regstate;
 static int gprs_rtype=-1;
 static int gsm_selmode=-1;
 static char imei[16+4];
+
+static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
+static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
 
 static void handle_cdma_ccwa (const char *s)
 {
@@ -322,7 +327,7 @@ static int dataCallNum()
 	int i;
 	int callNumber = -1;
 
-	if(currentState() != RADIO_STATE_SIM_READY){
+	if(currentState() != Radio_READY){
 		return -1;
 	}
 
@@ -392,11 +397,12 @@ static void onRadioPowerOn()
 		at_send_command("AT+ODEN=911", NULL);
 //		at_send_command("AT+ALS=4294967295", NULL);
 	}
-	pollSIMState(NULL);
+	if (!cdma_phone)
+		pollSIMState(NULL);
 }
 
 /** do post- SIM ready initialization */
-static void onSIMReady()
+static void onRadioReady()
 {
 	/* Common initialization commands */
 
@@ -464,6 +470,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		if (err < 0 || p_response->success == 0) goto error;
 		setRadioState(RADIO_STATE_OFF);
 	} else if (onOff > 0 && sState == RADIO_STATE_OFF) {
+		char value[PROPERTY_VALUE_MAX];
 		err = at_send_command("AT+CFUN=1", &p_response);
 		if (err < 0|| p_response->success == 0) {
 			// Some stacks return an error when there is no SIM,
@@ -475,7 +482,17 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 				goto error;
 			}
 		}
-		setRadioState(RADIO_STATE_SIM_NOT_READY);
+		property_get("gsm.current.phone-type", value, "1");
+		if (value[0] == '2') {
+			cdma_phone = 1;
+			Radio_READY = RADIO_STATE_NV_READY;
+			Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
+		} else {
+			Radio_READY = RADIO_STATE_SIM_READY;
+			Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
+		}
+
+		setRadioState(Radio_NOT_READY);
 	}
 
 	at_response_free(p_response);
@@ -1016,7 +1033,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	s_incomingOrWaitingLine = -1;
 #endif /*WORKAROUND_ERRONEOUS_ANSWER*/
 
-	if(currentState() != RADIO_STATE_SIM_READY){
+	if(currentState() != Radio_READY){
 		/* Might be waiting for SIM PIN */
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 	}
@@ -3887,7 +3904,11 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	 * when RADIO_STATE_UNAVAILABLE.
 	 */
 	if (sState == RADIO_STATE_UNAVAILABLE
-			&& request != RIL_REQUEST_GET_SIM_STATUS
+			&& !(request == RIL_REQUEST_GET_SIM_STATUS
+				|| request == RIL_REQUEST_BASEBAND_VERSION
+				|| request == RIL_REQUEST_GET_IMEI
+				|| request == RIL_REQUEST_GET_IMEISV
+				|| request == RIL_REQUEST_DEVICE_IDENTITY)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -3898,7 +3919,11 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	 */
 	if (sState == RADIO_STATE_OFF
 			&& !(request == RIL_REQUEST_RADIO_POWER
-				|| request == RIL_REQUEST_GET_SIM_STATUS)
+				|| request == RIL_REQUEST_GET_SIM_STATUS
+				|| request == RIL_REQUEST_BASEBAND_VERSION
+				|| request == RIL_REQUEST_GET_IMEI
+				|| request == RIL_REQUEST_GET_IMEISV
+				|| request == RIL_REQUEST_DEVICE_IDENTITY)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -4305,9 +4330,9 @@ setRadioState(RIL_RadioState newState)
 		 * Currently, this doesn't happen, but if that changes then these
 		 * will need to be dispatched on the request thread
 		 */
-		if (sState == RADIO_STATE_SIM_READY) {
-			onSIMReady();
-		} else if (sState == RADIO_STATE_SIM_NOT_READY) {
+		if (sState == Radio_READY) {
+			onRadioReady();
+		} else if (sState == Radio_NOT_READY) {
 			onRadioPowerOn();
 		}
 	}
@@ -4690,9 +4715,10 @@ static void initializeCallback(void *param)
 		at_send_command("AT+ENCSQ=1", NULL);
 		at_send_command("AT@HTCPDPFD=0", NULL);
 	}
+
 	/* assume radio is off on error */
 	if (isRadioOn() > 0) {
-		setRadioState (RADIO_STATE_SIM_NOT_READY);
+		setRadioState (Radio_NOT_READY);
 	}
 }
 
