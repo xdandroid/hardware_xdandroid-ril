@@ -397,7 +397,9 @@ static void onRadioPowerOn()
 		at_send_command("AT+ODEN=911", NULL);
 //		at_send_command("AT+ALS=4294967295", NULL);
 	}
-	if (!cdma_phone)
+	if (cdma_phone)
+		setRadioState(Radio_READY);
+	else
 		pollSIMState(NULL);
 }
 
@@ -487,9 +489,11 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 			cdma_phone = 1;
 			Radio_READY = RADIO_STATE_NV_READY;
 			Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
+			LOGD("Using CDMA Phone");
 		} else {
 			Radio_READY = RADIO_STATE_SIM_READY;
 			Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
+			LOGD("Using GSM Phone");
 		}
 
 		setRadioState(Radio_NOT_READY);
