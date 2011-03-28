@@ -164,6 +164,7 @@ static int regstate;
 static int gprs_rtype=-1;
 static int gsm_selmode=-1;
 static char imei[16+4];
+static char home_sid[sizeof("32767")] = "0";
 
 static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
 static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
@@ -3792,9 +3793,8 @@ static void requestCdmaSubscription(RIL_Token t) {
 	at_response_free(p_response);
 
 	/* AT+HTC_DM=xxxx to retrieve H_SID/H_NID. don't know what XXXX is yet. */
-	/* FIXME: hardcoded Sprint here */
-	strcpy(h_sids, "299");
-	strcpy(h_nids, "122");
+	strcpy(h_sids, home_sid);
+	strcpy(h_nids, "65535");
 
 	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
 	if (err != 0) goto error;
@@ -4309,6 +4309,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 		case RIL_REQUEST_CDMA_SUBSCRIPTION:
 			requestCdmaSubscription(t);
+			break;
 
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
 			requestNotSupported(t, request);
@@ -5047,7 +5048,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	close(fd);
 	parse_cmdline();
 
-	while ( -1 != (opt = getopt(argc, argv, "p:d:s:"))) {
+	while ( -1 != (opt = getopt(argc, argv, "h:p:d:s:"))) {
 		switch (opt) {
 			case 'p':
 				s_port = atoi(optarg);
@@ -5067,6 +5068,11 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 				s_device_path   = optarg;
 				s_device_socket = 1;
 				LOGI("Opening socket %s\n", s_device_path);
+				break;
+
+			case 'h':
+				strcpy(home_sid, optarg);
+				LOGI("CDMA Home SID set to %s\n", home_sid);
 				break;
 
 			default:
