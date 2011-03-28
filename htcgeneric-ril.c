@@ -3761,6 +3761,82 @@ static void requestCdmaSetSubscription(void *data, size_t datalen, RIL_Token t) 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
 }
 
+static void requestCdmaSubscription(RIL_Token t) {
+	int err, skip;
+	ATResponse *p_response = NULL;
+	char *line, *p;
+	char mdn[12];
+	char h_sids[64];
+	char h_nids[64];
+	char min[12];
+	char prl[8];
+	char *responseStr[5] = {mdn, h_sids, h_nids, min, prl};
+
+	err = at_send_command_singleline("AT+HTC_NAM_SEL?", "+HTC_NAM_SEL:", &p_response);
+	if (err != 0) goto error;
+
+	/* returns x,x,"MDN" */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextint(&line, &skip);
+	if (err < 0) goto error;
+	err = at_tok_nextint(&line, &skip);
+	if (err < 0) goto error;
+	err = at_tok_nextstr(&line, &p);
+	strncpy(mdn, p, sizeof(mdn));
+	mdn[sizeof(mdn)-1] = '\0';
+
+	at_response_free(p_response);
+
+	/* AT+HTC_DM=xxxx to retrieve H_SID/H_NID. don't know what XXXX is yet. */
+	/* FIXME: hardcoded Sprint here */
+	strcpy(h_sids, "299");
+	strcpy(h_nids, "122");
+
+	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
+	if (err != 0) goto error;
+
+	/* returns x,x,esn,prl,x,min,x,x */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	err = at_tok_nextstr(&line, &p);	/* esn, we might want to keep this? */
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	strncpy(prl, p, sizeof(prl));
+	prl[sizeof(prl)-1] = '\0';
+
+	err = at_tok_nextstr(&line, &p);	/* unknown int 0 */
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);	/* operator ID + MIN */
+	if (err < 0) goto error;
+	skip = strlen(p);
+	if (skip < 10)
+		goto error;
+	strcpy(min, p + skip - 10);
+
+	at_response_free(p_response);
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
+	return;
+
+error:
+	at_response_free(p_response);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
 static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) {
 	int err=1;
 	int response[4];
@@ -4230,6 +4306,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 		case RIL_REQUEST_CDMA_SET_SUBSCRIPTION:
 			requestCdmaSetSubscription(data, datalen, t);
 			break;
+
+		case RIL_REQUEST_CDMA_SUBSCRIPTION:
+			requestCdmaSubscription(t);
 
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
 			requestNotSupported(t, request);
