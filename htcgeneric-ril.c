@@ -1764,6 +1764,7 @@ static void requestRegistrationState(int request, void *data,
 				radiotype = 0;	/* unknown */
 		}
 	} else {
+		count = 14;
 		if (radiotype == 2)	/* 1xRTT */
 			radiotype=6;
 		else if (radiotype == 3)	/* EvDO 0 */
@@ -1781,7 +1782,6 @@ static void requestRegistrationState(int request, void *data,
 			(regstate == REG_HOME || regstate == REG_ROAM)) {
 			char *line_bs;
 
-			count = 14;
 			/* returns SYSTYPE which we already have, ERIIND which
 			 * will be parsed in the unsol handler, CSQ, and 3GIND
 			 * We want the ERIIND...
@@ -1809,6 +1809,9 @@ static void requestRegistrationState(int request, void *data,
 			responseStr[11] = "1";	/* FIXME: current system in PRL? */
 			responseStr[12] = eriPRL;
 			responseStr[13] = "-1";
+		} else {
+			for (i=4; i<14; i++)
+				responseStr[i] = NULL;
 		}
 	}
 	sprintf(sstate, "%d", regstate);
