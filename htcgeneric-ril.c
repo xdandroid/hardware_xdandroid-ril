@@ -655,13 +655,12 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	return;
 
 error:
+	at_response_free(p_response);
 	if (t != NULL)
 		RIL_onRequestComplete(*t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	else
 		RIL_onUnsolicitedResponse(RIL_UNSOL_DATA_CALL_LIST_CHANGED,
 				NULL, 0);
-
-	at_response_free(p_response);
 }
 
 static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
@@ -3750,7 +3749,7 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	int commas;
 	int skip;
 	int i;
-	int count = 3;
+	int count = 3, len = 0;
 	int cur_cid;
 
 	RIL_NeighboringCell **pp_cellIds;
@@ -3813,9 +3812,10 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
+			p = line;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
 			if (err < 0) goto error;
+			err = at_tok_nextstr(&p, &p_cellIds[0].cid);
 			break;
 		case 3: /* +CREG: <n>, <stat>, <lac>, <cid> */
 			err = at_tok_nextint(&line, &skip);
@@ -3824,10 +3824,11 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
+			p = line;
 			err = at_tok_nexthexint(&line, &cur_cid);
-			asprintf(&(p_cellIds[0].cid), "%x", cur_cid);
-			p_cellIds[0].rssi=2;
 			if (err < 0) goto error;
+			p_cellIds[0].rssi=2;
+			err = at_tok_nextstr(&p, &p_cellIds[0].cid);
 			break;
 		case 4: /* +CGREG: <n>, <stat>, <lac>, <cid>, <networkType> */
 			err = at_tok_nextint(&line, &skip);
@@ -3836,8 +3837,10 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			if (err < 0) goto error;
 			err = at_tok_nexthexint(&line, &response[1]);
 			if (err < 0) goto error;
-			err = at_tok_nextstr(&line, &p_cellIds[0].cid);
+			p = line;
+			err = at_tok_nexthexint(&line, &cur_cid);
 			if (err < 0) goto error;
+			err = at_tok_nextstr(&p, &p_cellIds[0].cid);
 			err = at_tok_nexthexint(&line, &response[3]);
 			if (err < 0) goto error;
 			count = 4;
@@ -3845,9 +3848,10 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 		default:
 			goto error;
 	}
+	len = sizeof(*pp_cellIds);
 
 done:
-	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, sizeof(*pp_cellIds));
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, len);
 	at_response_free(p_response);
 	return;
 
