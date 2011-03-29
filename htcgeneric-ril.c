@@ -159,7 +159,6 @@ static int countValidCalls=0;
 static int signalStrength[2];
 static char eriPRL[4];
 static int got_state_change=0;
-static int do_loc_updates=1;
 static int regstate;
 static int gprs_rtype=-1;
 static int gsm_selmode=-1;
@@ -387,12 +386,13 @@ static void onRadioPowerOn()
 		at_send_command("AT+CLIP=1", NULL);
 		at_send_command("AT+CLIR=0", NULL);
 		at_send_command("AT+CPPP=2", NULL);
-		at_send_command("AT+HTCNV=1,12,6", NULL);
+		/* CNV=DTM, GPRSCLASS, HSDPA category [,HSUPA category] */
+		at_send_command("AT+HTCNV=1,12,8,5", NULL);
 
 		/*enable ENS mode, okay to fail */
 //		at_send_command("AT+HTCENS=1", NULL);
 //		at_send_command("AT+HSDPA=1", NULL);
-		at_send_command("AT+HTCAGPS=5", NULL);
+		at_send_command("AT+HTCAGPS=2", NULL);
 		at_send_command("AT", NULL);
 		at_send_command("AT+ODEN=112", NULL);
 		at_send_command("AT+ODEN=911", NULL);
@@ -1467,10 +1467,8 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 
 			err = at_send_command("AT+ENCSQ=1", NULL);
 			if (err < 0) goto error;
-			if (do_loc_updates) {
-				err = at_send_command("AT+CREG=2", NULL);
-				if (err < 0) goto error;
-			}
+			err = at_send_command("AT+CREG=2", NULL);
+			if (err < 0) goto error;
 			err = at_send_command("AT+HTCCTZR=1", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
@@ -1513,10 +1511,8 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			if (err < 0) goto error;
 			err = at_send_command("AT+ENCSQ=0", NULL);
 			if (err < 0) goto error;
-			if (do_loc_updates) {
-				err = at_send_command("AT+CREG=1", NULL);
-				if (err < 0) goto error;
-			}
+			err = at_send_command("AT+CREG=1", NULL);
+			if (err < 0) goto error;
 			err = at_send_command("AT+HTCCTZR=2", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
@@ -3084,12 +3080,11 @@ static void requestExplicitCallTransfer(RIL_Token t)
 static void requestSetLocationUpdates(void *data, size_t datalen, RIL_Token t)
 {
 	int err = 0;
-	int updates;
 	char cmd[sizeof("AT+CREG=1")];
-	do_loc_updates = ((int *)data)[0] == 1;
+	int updates = ((int *)data)[0] == 1;
 
-	updates = do_loc_updates ? 2 : 1;
-	sprintf(cmd, "AT+CREG=%d", updates);
+	/* HTC ril never disables it here */
+	sprintf(cmd, "AT%s", updates ? "+CREG=2" :"");
 
 	err = at_send_command(cmd,NULL);
 	if(err < 0)
@@ -3862,9 +3857,6 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	p_cellIds->cid = "";
 	p_cellIds->rssi = 0;
 
-	/* don't bother */
-	if (!do_loc_updates) goto done;
-
 	for (i=0;i<4 && err != 0;i++) {
 		err = at_send_command_singleline("AT+CREG?", "+CREG:", &p_response);
 	}
@@ -3950,7 +3942,6 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	}
 	len = sizeof(*pp_cellIds);
 
-done:
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, len);
 	at_response_free(p_response);
 	return;
@@ -4782,13 +4773,13 @@ static void initializeCallback(void *param)
 		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
 		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
 		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
-		at_send_command("AT+HTCNV=1,12,6", NULL);
-//		at_send_command("AT+HSDPA=1", NULL);
+		at_send_command("AT+HTCNV=1,12,8,5", NULL);
+		at_send_command("AT+HSDPA=2", NULL);
 		at_send_command("AT+HTCCNIV=0", NULL);
 //		at_send_command("AT@HTCDORMANCYSET=3", NULL);
 		at_send_command("AT@HTCPDPFD=0", NULL);
-		at_send_command("AT+HTCAGPS=5", NULL);
-		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
+		at_send_command("AT+HTCAGPS=2", NULL);
+//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
 		at_send_command("AT",NULL);
 		/* auto connect/disconnect settings */
 //		at_send_command("AT+CGAATT=2,1,0", NULL);
