@@ -1278,7 +1278,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 	int response[2];
 	char *line;
 
-#if 0	/* Just rely on unsolicited reports */
+	/* If we have no recent report, ask */
 	if(signalStrength[0] == 0 && signalStrength[1] == 0) {
 		if(isgsm)
 			err = at_send_command_singleline("AT+CSQ", "+CSQ:", &p_response);
@@ -1304,18 +1304,15 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 			response[0]*=2;
 			response[1]=99;
 		}
-		signalStrength[0] = response[0];
-		signalStrength[1] = response[1];
 		at_response_free(p_response);
 
 	} else {
 		LOGD("Sending stored CSQ values to RIL");
 		response[0] = signalStrength[0];
 		response[1] = signalStrength[1];
+		signalStrength[0] = 0;
+		signalStrength[1] = 0;
 	}
-#endif
-	response[0] = signalStrength[0];
-	response[1] = signalStrength[1];
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	return;
 
@@ -1469,8 +1466,10 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			if (err < 0) goto error;
 			err = at_send_command("AT+CREG=2", NULL);
 			if (err < 0) goto error;
-			err = at_send_command("AT+HTCCTZR=1", NULL);
+			err = at_send_command("AT+CSQ", NULL);
 			if (err < 0) goto error;
+//			err = at_send_command("AT+HTCCTZR=1", NULL);
+//			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
 			if (err < 0) goto error;
 		} else {
@@ -1507,14 +1506,14 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 			err = at_send_command("AT@HTCCSQ=0", NULL);
 			if (err < 0) goto error;*/
 
-			err = at_send_command("AT+HTCPDPIDLE", NULL);
-			if (err < 0) goto error;
+//			err = at_send_command("AT+HTCPDPIDLE", NULL);
+//			if (err < 0) goto error;
 			err = at_send_command("AT+ENCSQ=0", NULL);
 			if (err < 0) goto error;
 			err = at_send_command("AT+CREG=1", NULL);
 			if (err < 0) goto error;
-			err = at_send_command("AT+HTCCTZR=2", NULL);
-			if (err < 0) goto error;
+//			err = at_send_command("AT+HTCCTZR=2", NULL);
+//			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
 			if (err < 0) goto error;
 		} else {
@@ -2530,12 +2529,21 @@ static void unsolicitedRSSI(const char * s)
 	err = at_tok_nextint(&line, &(response[0]));
 	if (err < 0) goto error;
 
+	if (isgsm) {
+		if (at_tok_hasmore(&line)) {
+			err = at_tok_nextint(&line, &(response[1]));
+			if (err < 0) goto error;
+		} else {
+			response[1] = 99;
+		}
+	} else {
 #if 0
-	response[0]=asu_table[response[0]%6];
+		response[0]=asu_table[response[0]%6];
 #else
-	response[0]*=2;
+		response[0]*=2;
 #endif
-	response[1]=99;
+		response[1]=99;
+	}
 
 	signalStrength[0]=response[0];
 	signalStrength[1]=response[1];
@@ -4848,7 +4856,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 	} else if (strStartsWith(s,"+XCIEV:")
 			|| strStartsWith(s,"$HTC_CSQ:")
-			|| strStartsWith(s,"@HTCCSQ:")) {
+			|| strStartsWith(s,"+CSQ:")
+/*			|| strStartsWith(s,"@HTCCSQ:") */) {
 		unsolicitedRSSI(s);
 	} else if (strStartsWith(s,"+CREG:")
 			|| strStartsWith(s,"+CGREG:")
