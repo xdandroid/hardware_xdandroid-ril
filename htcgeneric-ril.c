@@ -160,7 +160,7 @@ static int signalStrength[2];
 static char eriPRL[4];
 static int got_state_change=0;
 static int regstate;
-static int gprs_rtype=-1;
+static int gsm_rtype=-1;
 static int gsm_selmode=-1;
 static char imei[16+4];
 static char home_sid[sizeof("32767")] = "0";
@@ -1669,9 +1669,7 @@ static void requestRegistrationState(int request, void *data,
 			at_tok_nextstr(&p, &responseStr[2]);
 
 			/* Hack for broken +CGREG responses which don't return the network type */
-			if(request == RIL_REQUEST_GPRS_REGISTRATION_STATE &&
-				(regstate == REG_HOME || regstate == REG_ROAM) &&
-				gprs_rtype == -1) {
+			if((regstate == REG_HOME || regstate == REG_ROAM) && gsm_rtype == -1) {
 				ATResponse *p_response_op = NULL;
 				err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response_op);
 				/* We need to get the 4th return param */
@@ -1694,7 +1692,7 @@ static void requestRegistrationState(int request, void *data,
 					if (err < 0) goto error;
 					err = at_tok_nextint(&line_op, &radiotype);
 					if (err < 0) goto error;
-					gprs_rtype = radiotype;
+					gsm_rtype = radiotype;
 				}
 
 				at_response_free(p_response_op);
@@ -1718,7 +1716,7 @@ static void requestRegistrationState(int request, void *data,
 			at_tok_nextstr(&p, &responseStr[2]);
 			err = at_tok_nexthexint(&line, &radiotype);
 			if (err < 0) goto error;
-			gprs_rtype = radiotype;
+			gsm_rtype = radiotype;
 			break;
 		default:
 			goto error;
@@ -1727,7 +1725,7 @@ static void requestRegistrationState(int request, void *data,
 	if (isgsm) {
 		/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
 		if (radiotype == -1 && (regstate == REG_HOME || regstate == REG_ROAM))
-			radiotype = gprs_rtype;
+			radiotype = gsm_rtype;
 		switch(radiotype) {
 			/* GSM/GSM Compact - aka GPRS */
 			case 0:
@@ -1884,7 +1882,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 			if (err < 0) goto error;
 
 			if (at_tok_hasmore(&line)) {
-				at_tok_nextint(&line, &gprs_rtype);
+				at_tok_nextint(&line, &gsm_rtype);
 			}
 		}
 
@@ -2575,7 +2573,7 @@ static void unsolicitedCREG(const char * s)
 				regstate = i;
 		}
 	}
-	gprs_rtype = -1;
+	gsm_rtype = -1;
 	gsm_selmode = -1;
 }
 
@@ -3843,38 +3841,78 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static void neighborRSSI(void *s) {
+	unsolicitedRSSI(s);
+	free(s);
+}
+
 static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) {
 	int err=1;
-	int response[4];
-	char * responseStr[4];
+	int response[2];
 	ATResponse *p_response = NULL;
 	char *line, *p;
 	int commas;
 	int skip;
 	int i;
-	int count = 3, len = 0;
+	int count = 0, len;
 	int cur_cid;
+	int is_2g = (gsm_rtype == 0 || gsm_rtype == 1 || gsm_rtype == 3);
+	char cmd[] = "AT+Q3GNCELL";
+	char prefix[] = "+Q3GNCELL:";
 
-	RIL_NeighboringCell **pp_cellIds;
-	RIL_NeighboringCell *p_cellIds;
+	RIL_NeighboringCell **pp_cellIds, *pp_dummy;
 
-	pp_cellIds = (RIL_NeighboringCell **)alloca(sizeof(RIL_NeighboringCell *));
-	p_cellIds = (RIL_NeighboringCell *)alloca(sizeof(RIL_NeighboringCell));
-	pp_cellIds[0]=p_cellIds;
-
-	p_cellIds->cid = "";
-	p_cellIds->rssi = 0;
-
-	for (i=0;i<4 && err != 0;i++) {
-		err = at_send_command_singleline("AT+CREG?", "+CREG:", &p_response);
+	if (is_2g) {
+		cmd[4] = '2';
+		prefix[2] = '2';
 	}
 
-	if (err != 0) goto error;
+	err = at_send_command_singleline(cmd, prefix, &p_response);
+	if (err < 0 || p_response->success == 0)
+		goto error;
 
+	/* my cid, my rssi, # of neighbors [[,neighbor, rssi] ...] */
 	line = p_response->p_intermediates->line;
 
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
+
+	/* CID,rssi */
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	err = at_tok_nextint(&line, &response[0]);
+	if (err < 0) goto error;
+
+	at_send_command("AT+CSQ", NULL);
+
+	err = at_tok_nextint(&line, &count);
+	if (err < 0) goto error;
+
+	/* No neighbors found */
+	if (count < 1) {
+		len = 0;
+		pp_cellIds = &pp_dummy;
+		pp_dummy = NULL;
+		goto done;
+	}
+
+	pp_cellIds = (RIL_NeighboringCell **)alloca(count * sizeof(RIL_NeighboringCell *));
+
+	for (i=0; i<count; i++) {
+		int cid;
+		pp_cellIds[i] = (RIL_NeighboringCell *)alloca(sizeof(RIL_NeighboringCell)+10);
+		pp_cellIds[i]->cid = (char *)(pp_cellIds[i] + 1);
+		if (is_2g)
+			err = at_tok_nexthexint(&line, &cid);
+		else
+			err = at_tok_nextint(&line, &cid);
+		if (err < 0) goto error;
+		sprintf(pp_cellIds[i]->cid, "%x", cid);
+		err = at_tok_nextint(&line, &pp_cellIds[i]->rssi);
+		if (err < 0) goto error;
+	}
+	len = count * sizeof(*pp_cellIds);
+#if 0
 	/* Ok you have to be careful here
 	 * The solicited version of the CREG response is
 	 * +CREG: n, stat, [lac, cid]
@@ -3949,7 +3987,9 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 			goto error;
 	}
 	len = sizeof(*pp_cellIds);
+#endif
 
+done:
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_cellIds, len);
 	at_response_free(p_response);
 	return;
@@ -4790,10 +4830,11 @@ static void initializeCallback(void *param)
 //		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
 		at_send_command("AT",NULL);
 		/* auto connect/disconnect settings */
-//		at_send_command("AT+CGAATT=2,1,0", NULL);
 //		at_send_command("AT+BANDSET=0", NULL);
+//		at_send_command("AT+CGAATT=2,1,0", NULL);
 		at_send_command("AT+GTKC=2", NULL);
-
+		at_send_command("AT+2GNCELL=1", NULL);
+		at_send_command("AT+3GNCELL=1", NULL);
 
 	} else {
 		if (is_world_cdma)
