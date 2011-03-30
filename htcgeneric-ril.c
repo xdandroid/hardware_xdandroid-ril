@@ -1475,8 +1475,8 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 		} else {
 			err = at_send_command("AT+ENCSQ=1", NULL);
 			if (err < 0) goto error;
-			err = at_send_command("AT+HTCCTZR=1", NULL);
-			if (err < 0) goto error;
+//			err = at_send_command("AT+HTCCTZR=1", NULL);
+//			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=0", NULL);
 			if (err < 0) goto error;
 
@@ -1519,8 +1519,8 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 		} else {
 			err = at_send_command("AT+ENCSQ=0", NULL);
 			if (err < 0) goto error;
-			err = at_send_command("AT+HTCCTZR=2", NULL);
-			if (err < 0) goto error;
+//			err = at_send_command("AT+HTCCTZR=2", NULL);
+//			if (err < 0) goto error;
 			err = at_send_command("AT@HTCPDPFD=1", NULL);
 			if (err < 0) goto error;
 
