@@ -180,6 +180,7 @@ static int regstate;
 static int gsm_rtype=-1;
 static int gsm_selmode=-1;
 static RADIO_Types android_rtype=RADIO_UNKNOWN;
+static int calling_data=0;	/* are we in the process of setting up data? */
 static char imei[16+4];
 static char home_sid[sizeof("32767")] = "0";
 
@@ -2139,6 +2140,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		// packet-domain event reporting
 		err = at_send_command("AT+CGEREP=1,0", NULL);
 		// Hangup anything that's happening there now
+		calling_data = 1;
 		err = at_send_command("AT+CGACT=0,1", NULL);
 		// Start data on PDP context 1
 		err = at_send_command("ATD*99***1#", &p_response);
@@ -2150,6 +2152,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	} else {
 		//CDMA
 		err = at_send_command("AT+CFUN=1", NULL);
+		calling_data = 1;
 		err = at_send_command("AT+HTC_DUN=0", NULL);
 		err = at_send_command("ATH", NULL);
 		err = at_send_command("ATDT#777", &p_response);
@@ -2218,10 +2221,12 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	ifc_close();
 	*/
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+	calling_data = 0;
 	return;
 
 error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	calling_data = 0;
 
 }
 
@@ -4949,6 +4954,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
 		}
+		if (calling_data && s[0] == 'N')
+			return;
 		RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 				NULL, 0);
