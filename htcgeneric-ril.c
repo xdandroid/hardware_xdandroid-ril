@@ -2143,7 +2143,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		calling_data = 1;
 		err = at_send_command("AT+CGACT=0,1", NULL);
 		// Start data on PDP context 1
-		err = at_send_command_singleline("ATD*99***1#", "CONNECT", &p_response);
+		err = at_send_command_singleline("ATD*99***1#", "+PCD:", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			at_response_free(p_response);
 			goto error;
