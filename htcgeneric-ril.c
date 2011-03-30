@@ -2143,7 +2143,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		calling_data = 1;
 		err = at_send_command("AT+CGACT=0,1", NULL);
 		// Start data on PDP context 1
-		err = at_send_command("ATD*99***1#", &p_response);
+		err = at_send_command_singleline("ATD*99***1#", "CONNECT", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			at_response_free(p_response);
 			goto error;
@@ -2155,7 +2155,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		calling_data = 1;
 		err = at_send_command("AT+HTC_DUN=0", NULL);
 		err = at_send_command("ATH", NULL);
-		err = at_send_command("ATDT#777", &p_response);
+		err = at_send_command_singleline("ATDT#777", "CONNECT", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			at_response_free(p_response);
 			goto error;
@@ -4945,6 +4945,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			|| strStartsWith(s,"+CTZDST:")
 			|| strStartsWith(s,"+HTCCTZV:")) {
 		unsolicitedNitzTime(s);
+	} else if (strStartsWith(s,"+PCD:")) {
+		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 	} else if (strStartsWith(s,"+CRING:")
 			|| strStartsWith(s,"RING")
 			|| strStartsWith(s,"NO CARRIER")
@@ -4954,8 +4956,6 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
 		}
-		if (calling_data && s[0] == 'N')
-			return;
 		RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 				NULL, 0);
