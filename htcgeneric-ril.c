@@ -74,6 +74,23 @@ typedef enum {
 	SIM_NETWORK_PERSONALIZATION = 5
 } SIM_Status;
 
+/* These are the known types, from ril.h */
+typedef enum {
+	RADIO_UNKNOWN = 0,
+	RADIO_GPRS,
+	RADIO_EDGE,
+	RADIO_UMTS,
+	RADIO_IS95A,
+	RADIO_IS95B,
+	RADIO_1xRTT,
+	RADIO_EVDO_0,
+	RADIO_EVDO_A,
+	RADIO_HSDPA,
+	RADIO_HSUPA,
+	RADIO_HSPA,
+	RADIO_EVDO_B
+} RADIO_Types;
+
 static void onRequest (int request, void *data, size_t datalen, RIL_Token t);
 static RIL_RadioState currentState();
 static int onSupports (int requestCode);
@@ -162,6 +179,7 @@ static int got_state_change=0;
 static int regstate;
 static int gsm_rtype=-1;
 static int gsm_selmode=-1;
+static RADIO_Types android_rtype=RADIO_UNKNOWN;
 static char imei[16+4];
 static char home_sid[sizeof("32767")] = "0";
 
@@ -1276,6 +1294,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 	ATResponse *p_response = NULL;
 	int err;
 	int response[2];
+	RIL_SignalStrength rs = {{-1,-1},{-1,-1},{-1,-1,-1}};
 	char *line;
 
 	/* If we have no recent report, ask */
@@ -1300,26 +1319,44 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 
 		err = at_tok_nextint(&line, &(response[1]));
 		if (err < 0) goto error;
-		if(!isgsm) {
-			response[0]*=2;
-			response[1]=99;
-		}
-		at_response_free(p_response);
 
+		at_response_free(p_response);
 	} else {
-		LOGD("Sending stored CSQ values to RIL");
+		LOGD("Sending stored RSSI values to RIL");
 		response[0] = signalStrength[0];
 		response[1] = signalStrength[1];
 		signalStrength[0] = 0;
 		signalStrength[1] = 0;
 	}
-	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
+
+	if (isgsm) {
+		rs.GW_SignalStrength.signalStrength = response[0];
+		rs.GW_SignalStrength.bitErrorRate = response[1];
+	} else {
+		if(cdma_phone) {
+			if (android_rtype == RADIO_EVDO_0 ||
+				android_rtype == RADIO_EVDO_A ||
+				android_rtype == RADIO_EVDO_B) {
+				rs.EVDO_SignalStrength.dbm = response[0];
+				rs.EVDO_SignalStrength.ecio = response[1];
+			} else {
+				rs.CDMA_SignalStrength.dbm = response[0];
+				rs.CDMA_SignalStrength.ecio = response[1];
+			}
+		} else {
+			/* fake GSM mode */
+			rs.GW_SignalStrength.signalStrength = response[0]*2;
+			rs.GW_SignalStrength.bitErrorRate = 99;
+		}
+	}
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, &rs, sizeof(rs));
 	return;
 
 error:
 	LOGE("requestSignalStrength must never return an error when radio is on");
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	at_response_free(p_response);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestDtmfStart(void *data, size_t datalen, RIL_Token t)
@@ -1730,46 +1767,46 @@ static void requestRegistrationState(int request, void *data,
 			/* GSM/GSM Compact - aka GPRS */
 			case 0:
 			case 1:
-				radiotype = 1;
+				radiotype = RADIO_GPRS;
 				break;
 				/* EGPRS - aka EDGE */
 			case 3:
-				radiotype = 2;
+				radiotype = RADIO_EDGE;
 				break;
 				/* UTRAN - UMTS aka 3G */
 			case 2:
 			case 7:
-				radiotype = 3;
+				radiotype = RADIO_UMTS;
 				break;
 				/* UTRAN with HSDPA */
 			case 4:
-				radiotype = 9;
+				radiotype = RADIO_HSDPA;
 				break;
 				/* UTRAN with HSUPA */
 			case 5:
-				radiotype = 10;
+				radiotype = RADIO_HSUPA;
 				break;
 				/* UTRAN with HSPA (HSDPA and HSUPA) */
 			case 6:
-				radiotype = 11;
+				radiotype = RADIO_HSPA;
 				break;
 			default:
-				radiotype = 0;	/* unknown */
+				radiotype = RADIO_UNKNOWN;
 		}
 	} else {
 		count = 14;
 		if (radiotype == 2)	/* 1xRTT */
-			radiotype=6;
+			radiotype=RADIO_1xRTT;
 		else if (radiotype == 3)	/* EvDO 0 */
-			radiotype=7;
+			radiotype=RADIO_EVDO_0;
 		else if (radiotype >= 4)	/* EvDO A */
-			radiotype=8;
+			radiotype=RADIO_EVDO_A;
 #if 0
 		else if (radiotype == 5)	/* EvDO B? */
-			radiotype = 12;		/* Gingerbread only? */
+			radiotype = RADIO_EVDO_B;		/* Gingerbread only? */
 #endif
 		else if (radiotype == -1)	/* unknown */
-			radiotype = 0;
+			radiotype = RADIO_UNKNOWN;
 
 		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE &&
 			(regstate == REG_HOME || regstate == REG_ROAM)) {
@@ -1809,6 +1846,7 @@ static void requestRegistrationState(int request, void *data,
 	}
 	sprintf(sstate, "%d", regstate);
 	sprintf(sradiotype, "%d", radiotype);
+	android_rtype = radiotype;
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, count*sizeof(char*));
 	at_response_free(p_response_bs);
@@ -2516,7 +2554,8 @@ static void unsolicitedRSSI(const char * s)
 	int err;
 	int response[2];
 	char * line = NULL, *origline;
-	const unsigned char asu_table[6]={0,2,6,12,25,31};
+	const unsigned char asu_table[5]={0,3,5,8,12};
+	RIL_SignalStrength rs = {{-1,-1},{-1,-1},{-1,-1,-1}};
 
 	origline = strdup(s);
 	line = origline;
@@ -2527,27 +2566,42 @@ static void unsolicitedRSSI(const char * s)
 	err = at_tok_nextint(&line, &(response[0]));
 	if (err < 0) goto error;
 
+	response[1] = 99;
+	if (at_tok_hasmore(&line)) {
+		err = at_tok_nextint(&line, &(response[1]));
+		if (err < 0) goto error;
+	}
 	if (isgsm) {
-		if (at_tok_hasmore(&line)) {
-			err = at_tok_nextint(&line, &(response[1]));
-			if (err < 0) goto error;
-		} else {
-			response[1] = 99;
-		}
-	} else {
-#if 0
-		response[0]=asu_table[response[0]%6];
-#else
-		response[0]*=2;
-#endif
-		response[1]=99;
+		if (s[0] == '@')
+			response[0]=asu_table[response[0]%5];
 	}
 
 	signalStrength[0]=response[0];
 	signalStrength[1]=response[1];
 	free(origline);
 
-	RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, response, sizeof(response));
+	if (isgsm) {
+		rs.GW_SignalStrength.signalStrength = response[0];
+		rs.GW_SignalStrength.bitErrorRate = response[1];
+	} else {
+		if(cdma_phone) {
+			if (android_rtype == RADIO_EVDO_0 ||
+				android_rtype == RADIO_EVDO_A ||
+				android_rtype == RADIO_EVDO_B) {
+				rs.EVDO_SignalStrength.dbm = response[0];
+				rs.EVDO_SignalStrength.ecio = response[1];
+			} else {
+				rs.CDMA_SignalStrength.dbm = response[0];
+				rs.CDMA_SignalStrength.ecio = response[1];
+			}
+		} else {
+			/* fake GSM mode */
+			rs.GW_SignalStrength.signalStrength = response[0]*2;
+			rs.GW_SignalStrength.bitErrorRate = 99;
+		}
+	}
+
+	RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &rs, sizeof(rs));
 	return;
 
 error:
@@ -3883,7 +3937,11 @@ static void requestNeighboringCellIds(void * data, size_t datalen, RIL_Token t) 
 	err = at_tok_nextint(&line, &response[0]);
 	if (err < 0) goto error;
 
-	at_send_command("AT+CSQ", NULL);
+	/* Dunno how the 3G units map to CSQ */
+	if (is_2g) {
+		signalStrength[0] = response[0];
+		signalStrength[1] = 99;
+	}
 
 	err = at_tok_nextint(&line, &count);
 	if (err < 0) goto error;
@@ -4898,7 +4956,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 	} else if (strStartsWith(s,"+XCIEV:")
 			|| strStartsWith(s,"$HTC_CSQ:")
 			|| strStartsWith(s,"+CSQ:")
-/*			|| strStartsWith(s,"@HTCCSQ:") */) {
+			|| strStartsWith(s,"@HTCCSQ:")) {
 		unsolicitedRSSI(s);
 	} else if (strStartsWith(s,"+CREG:")
 			|| strStartsWith(s,"+CGREG:")
