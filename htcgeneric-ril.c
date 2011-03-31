@@ -1297,7 +1297,8 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
 
 static void resp2Strength(int *response, RIL_SignalStrength *rs)
 {
-	const int dbm_table[8] = {135,125,115,105,95,85,75,65};
+	const int dbm_table[8] = {135,125,115,105,95,85,75,70};
+	const int edbm_table[8] = {120,110,100,90,80,75,70,65};
 	const int ecio_table[8] = {200,150,130,120,110,100,90,80};
 
 	if (isgsm) {
@@ -1308,7 +1309,7 @@ static void resp2Strength(int *response, RIL_SignalStrength *rs)
 			/* 1st # is CDMA, 2nd is EVDO */
 			rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
 			rs->CDMA_SignalStrength.ecio = ecio_table[response[0]];
-			rs->EVDO_SignalStrength.dbm = dbm_table[response[1]];
+			rs->EVDO_SignalStrength.dbm = edbm_table[response[1]];
 			rs->EVDO_SignalStrength.ecio = ecio_table[response[1]];
 			rs->EVDO_SignalStrength.signalNoiseRatio = response[1];
 		} else {
