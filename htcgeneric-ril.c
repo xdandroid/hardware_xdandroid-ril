@@ -3870,7 +3870,8 @@ static void requestCdmaSubscription(RIL_Token t) {
 
 	/* AT+HTC_DM=xxxx to retrieve H_SID/H_NID. XXXX obtained from CDMA Hero. */
 	err = at_send_command_singleline("AT+HTC_DM=C826030100", "+HTC_DM:", &p_response);
-	if (err != 0) goto error;
+	if (err < 0 || p_response->success == 0)
+		goto error;
 
 	/* returns long string of hex addresses and data */
 	line = p_response->p_intermediates->line;
@@ -3878,6 +3879,7 @@ static void requestCdmaSubscription(RIL_Token t) {
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
 
+	LOGD("Hex SID/NID: %.32s\n", line);
 	p = line + sizeof("C826030100")-1;
 	p[8] = '\0';
 	LOGD("Hex SID/NID: %s\n", p);
@@ -4829,8 +4831,11 @@ static void initializeCallback(void *param)
 	/* Common initialization strings */
 
 	/*  atchannel is tolerant of echo but it must */
-	/*  reset and have verbose result codes */
-	at_send_command("ATZV1", NULL);
+	/*  reset and have numeric result codes
+	 *	can't use text result codes, some commands
+	 *	force numeric anyway
+	 */
+	at_send_command("ATZV0", NULL);
 
 	/*  echo off */
 	at_send_command("ATE0", NULL);
@@ -4981,8 +4986,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 	} else if (strStartsWith(s,"+PCD:")) {
 		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 	} else if (strStartsWith(s,"+CRING:")
-			|| strStartsWith(s,"RING")
-			|| strStartsWith(s,"NO CARRIER")
+			|| !strcmp(s, "2") /* RING */
+			|| !strcmp(s, "3") /* NO CARRIER */
 			|| strStartsWith(s,"+CCWA")
 		  ) {
 		if (strStartsWith(s,"+CCWA") && !isgsm) {

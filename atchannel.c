@@ -147,19 +147,22 @@ static void addIntermediate(const char *line)
  * WARNING: NO CARRIER and others are sometimes unsolicited
  */
 static const char * s_finalResponsesError[] = {
-    "ERROR",
+    "3",			/* NO CARRIER * sometimes! */
+    "4",			/* ERROR */
+    "6",			/* NO DIALTONE */
+    "8",			/* NO ANSWER */
     "+CMS ERROR:",
     "+CME ERROR:",
-    "NO CARRIER", /* sometimes! */
-    "NO ANSWER",
-    "NO DIALTONE",
 };
 static int isFinalResponseError(const char *line)
 {
     size_t i;
 
     for (i = 0 ; i < NUM_ELEMS(s_finalResponsesError) ; i++) {
-        if (strStartsWith(line, s_finalResponsesError[i])) {
+		if ((line[0] == '+' && s_finalResponsesError[i][1] &&
+			strStartsWith(line, s_finalResponsesError[i])) ||
+			(line[1] == '\0' && line[0] == s_finalResponsesError[i][0]))
+		{
             return 1;
         }
     }
@@ -173,15 +176,15 @@ static int isFinalResponseError(const char *line)
  * WARNING: NO CARRIER and others are sometimes unsolicited
  */
 static const char * s_finalResponsesSuccess[] = {
-    "OK",
-    "CONNECT"       /* some stacks start up data on another channel */
+    "0",			/* OK */
+    "1",			/* CONNECT * some stacks start up data on another channel */
 };
 static int isFinalResponseSuccess(const char *line)
 {
     size_t i;
 
     for (i = 0 ; i < NUM_ELEMS(s_finalResponsesSuccess) ; i++) {
-        if (strStartsWith(line, s_finalResponsesSuccess[i])) {
+        if (!line[1] && line[0] == s_finalResponsesSuccess[i][0]) {
             return 1;
         }
     }
@@ -971,7 +974,7 @@ int at_handshake()
 
     for (i = 0 ; i < HANDSHAKE_RETRY_COUNT ; i++) {
         /* some stacks start with verbose off */
-        err = at_send_command_full_nolock ("ATE0Q0V1", NO_RESULT,
+        err = at_send_command_full_nolock ("ATE0Q0V0", NO_RESULT,
                     NULL, NULL, HANDSHAKE_TIMEOUT_MSEC, NULL);
 
         if (err == 0) {
