@@ -1297,7 +1297,8 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
 
 static void resp2Strength(int *response, RIL_SignalStrength *rs)
 {
-	const int dbm_table[8] = {0,125,115,105,95,85,75,65};
+	const int dbm_table[8] = {135,125,115,105,95,85,75,65};
+	const int ecio_table[8] = {200,150,130,120,110,100,90,80};
 
 	if (isgsm) {
 		rs->GW_SignalStrength.signalStrength = response[0];
@@ -1306,9 +1307,10 @@ static void resp2Strength(int *response, RIL_SignalStrength *rs)
 		if (cdma_phone) {
 			/* 1st # is CDMA, 2nd is EVDO */
 			rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
-			rs->CDMA_SignalStrength.ecio = dbm_table[response[0]];
+			rs->CDMA_SignalStrength.ecio = ecio_table[response[0]];
 			rs->EVDO_SignalStrength.dbm = dbm_table[response[1]];
-			rs->EVDO_SignalStrength.ecio = dbm_table[response[1]];
+			rs->EVDO_SignalStrength.ecio = ecio_table[response[1]];
+			rs->EVDO_SignalStrength.signalNoiseRatio = response[1];
 		} else {
 			/* fake GSM mode */
 			rs->GW_SignalStrength.signalStrength = response[0]*4;
@@ -1322,7 +1324,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 	ATResponse *p_response = NULL;
 	int err;
 	int response[2];
-	RIL_SignalStrength rs = {{-1,-1},{-1,-1},{-1,-1,-1}};
+	RIL_SignalStrength rs = {{99,99},{-1,-1},{-1,-1,-1}};
 	char *line;
 
 	/* If we have no recent report, ask */
@@ -2589,7 +2591,7 @@ static void unsolicitedRSSI(const char * s)
 	int response[2];
 	const unsigned char asu_table[5]={0,3,5,8,12};
 	char * line = NULL, *origline;
-	RIL_SignalStrength rs = {{-1,-1},{-1,-1},{-1,-1,-1}};
+	RIL_SignalStrength rs = {{99,99},{-1,-1},{-1,-1,-1}};
 
 	origline = strdup(s);
 	line = origline;
@@ -2600,7 +2602,6 @@ static void unsolicitedRSSI(const char * s)
 	err = at_tok_nextint(&line, &(response[0]));
 	if (err < 0) goto error;
 
-	response[1] = 99;
 	if (at_tok_hasmore(&line)) {
 		err = at_tok_nextint(&line, &(response[1]));
 		if (err < 0) goto error;
