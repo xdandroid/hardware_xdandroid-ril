@@ -183,6 +183,7 @@ static RADIO_Types android_rtype=RADIO_UNKNOWN;
 static int calling_data=0;	/* are we in the process of setting up data? */
 static char imei[16+4];
 static char home_sid[sizeof("32767")] = "0";
+static int audio_on = 0;	/* is the audio on? */
 
 static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
 static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
@@ -1178,9 +1179,10 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	s_repollCallsCount = 0;
 #endif /*WORKAROUND_ERRONEOUS_ANSWER*/
 	LOGI("Calls=%d,Valid=%d\n",countCalls,countValidCalls);
-	if(countValidCalls==0) { // close audio if no voice calls.
+	if(countValidCalls==0 && audio_on) { // close audio if no voice calls.
 		LOGI("Audio Close\n");
 		writesys("audio","5");
+		audio_on = 0;
 	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, pp_calls,
@@ -1220,6 +1222,7 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
 		case 0: clir = ""; break;   /*subscription default*/
 	}
 	writesys("audio","2");
+	audio_on = 1;
 	if(cdma_north_american_dialing && strncmp(p_dial->address, "+1", 2)==0)
 		asprintf(&cmd, "ATD%s%s;", p_dial->address+1, clir);
 	else
@@ -3288,6 +3291,7 @@ static void requestAnswer(RIL_Token t)
 {
 	at_send_command("ATA", NULL);
 	writesys("audio","2");
+	audio_on = 1;
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
 	s_expectAnswer = 1;
