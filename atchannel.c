@@ -497,6 +497,8 @@ static int writeline (const char *s)
     size_t cur = 0;
     size_t len = strlen(s);
     ssize_t written;
+    char *w;
+    int ret = 0;
 
     if (s_fd < 0 || s_readerClosed > 0) {
         return AT_ERROR_CHANNEL_CLOSED;
@@ -504,38 +506,39 @@ static int writeline (const char *s)
 
     LOGD("AT> %s\n", s);
 
-    AT_DUMP( ">> ", s, strlen(s) );
+    AT_DUMP( ">> ", s, len );
+
+    w = malloc(len+1);
+    if (!w)
+	return AT_ERROR_GENERIC;
+    strcpy(w, s);
+    w[len] = '\r';
+    len++;
 
     /* the main string */
     while (cur < len) {
         do {
-            written = write (s_fd, s + cur, len - cur);
+            written = write (s_fd, w + cur, len - cur);
         } while (written < 0 && errno == EINTR);
 
         if (written < 0) {
-            return AT_ERROR_GENERIC;
+            ret = AT_ERROR_GENERIC;
+	    break;
         }
 
         cur += written;
     }
+    free(w);
 
-    /* the \r  */
-
-    do {
-        written = write (s_fd, "\r" , 1);
-    } while ((written < 0 && errno == EINTR) || (written == 0));
-
-    if (written < 0) {
-        return AT_ERROR_GENERIC;
-    }
-
-    return 0;
+    return ret;
 }
 static int writeCtrlZ (const char *s)
 {
     size_t cur = 0;
     size_t len = strlen(s);
     ssize_t written;
+    char *w;
+    int ret = 0;
 
     if (s_fd < 0 || s_readerClosed > 0) {
         return AT_ERROR_CHANNEL_CLOSED;
@@ -543,32 +546,31 @@ static int writeCtrlZ (const char *s)
 
     LOGD("AT> %s^Z\n", s);
 
-    AT_DUMP( ">* ", s, strlen(s) );
+    AT_DUMP( ">* ", s, len );
+
+    w = malloc(len+1);
+    if (!w)
+	return AT_ERROR_GENERIC;
+    strcpy(w, s);
+    w[len] = '\032';
+    len++;
 
     /* the main string */
     while (cur < len) {
         do {
-            written = write (s_fd, s + cur, len - cur);
+            written = write (s_fd, w + cur, len - cur);
         } while (written < 0 && errno == EINTR);
 
         if (written < 0) {
-            return AT_ERROR_GENERIC;
+            ret = AT_ERROR_GENERIC;
+	    break;
         }
 
         cur += written;
     }
+    free(w);
 
-    /* the ^Z  */
-
-    do {
-        written = write (s_fd, "\032" , 1);
-    } while ((written < 0 && errno == EINTR) || (written == 0));
-
-    if (written < 0) {
-        return AT_ERROR_GENERIC;
-    }
-
-    return 0;
+    return ret;
 }
 
 static void clearPendingCommand()
