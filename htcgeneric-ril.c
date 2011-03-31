@@ -1847,9 +1847,9 @@ static void requestRegistrationState(int request, void *data,
 			err = at_tok_nextstr(&line_bs, &responseStr[6]);
 			if (err < 0) goto error;
 			responseStr[7] = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
-			responseStr[10] = (regstate == REG_HOME) ? "1" : "128";	/* Roaming Indicator */
+			responseStr[10] = "128";/* FIXME: Roaming Indicator */
 			responseStr[11] = "1";	/* FIXME: current system in PRL? */
-			responseStr[12] = eriPRL;
+			responseStr[12] = eriPRL;	/* Default roaming indicator */
 			responseStr[13] = "-1";
 		} else {
 			for (i=4; i<14; i++)
