@@ -183,7 +183,6 @@ static int gsm_selmode=-1;
 static RADIO_Types android_rtype=RADIO_UNKNOWN;
 static int calling_data=0;	/* are we in the process of setting up data? */
 static char imei[16+4];
-static char home_sid[sizeof("32767")] = "0";
 static int audio_on = 0;	/* is the audio on? */
 
 static pid_t pppd_pid = 0;
@@ -3878,14 +3877,39 @@ static void requestCdmaSubscription(RIL_Token t) {
 	err = at_tok_nextint(&line, &skip);
 	if (err < 0) goto error;
 	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+
 	strncpy(mdn, p, sizeof(mdn));
 	mdn[sizeof(mdn)-1] = '\0';
 
 	at_response_free(p_response);
 
-	/* AT+HTC_DM=xxxx to retrieve H_SID/H_NID. don't know what XXXX is yet. */
-	strcpy(h_sids, home_sid);
-	strcpy(h_nids, "65535");
+	/* AT+HTC_DM=xxxx to retrieve H_SID/H_NID. XXXX obtained from CDMA Hero. */
+	err = at_send_command_singleline("AT+HTC_DM=C826030100", "+HTC_DM:", &p_response);
+	if (err != 0) goto error;
+
+	/* returns long string of hex addresses and data */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+
+	p += sizeof("C826030100")-1;
+	p[8] = '\0';
+	LOGD("Hex SID/NID: %s\n", p);
+	/* values are little endian */
+	/* There's space here for quite a long list of values
+	 * but we'll only parse the first, for now.
+	 */
+	skip = hex2int(p[0]) | (hex2int(p[1]) << 8);
+	sprintf(h_sids, "%d", skip);
+	skip = hex2int(p[2]) | (hex2int(p[3]) << 8);
+	sprintf(h_nids, "%d", skip);
+
+	at_response_free(p_response);
 
 	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
 	if (err != 0) goto error;
@@ -5205,11 +5229,6 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 				s_device_path   = optarg;
 				s_device_socket = 1;
 				LOGI("Opening socket %s\n", s_device_path);
-				break;
-
-			case 'h':
-				strcpy(home_sid, optarg);
-				LOGI("CDMA Home SID set to %s\n", home_sid);
 				break;
 
 			default:
