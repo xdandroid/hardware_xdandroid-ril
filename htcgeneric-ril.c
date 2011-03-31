@@ -3879,17 +3879,16 @@ static void requestCdmaSubscription(RIL_Token t) {
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
 
-	LOGD("Hex SID/NID: %.32s\n", line);
-	p = line + sizeof("C826030100")-1;
+	p = line + sizeof("C826030100");
 	p[8] = '\0';
-	LOGD("Hex SID/NID: %s\n", p);
+	LOGV("Hex SID/NID: %s\n", p);
 	/* values are little endian */
 	/* There's space here for quite a long list of values
 	 * but we'll only parse the first, for now.
 	 */
-	skip = hex2int(p[0]) | (hex2int(p[1]) << 8);
+	skip = hex2int(p[1]) | (hex2int(p[0]) << 4) | (hex2int(p[3]) << 8) | (hex2int(p[2]) << 12);
 	sprintf(h_sids, "%d", skip);
-	skip = hex2int(p[2]) | (hex2int(p[3]) << 8);
+	skip = hex2int(p[5]) | (hex2int(p[4]) << 4) | (hex2int(p[7]) << 8) | (hex2int(p[6]) << 12);
 	sprintf(h_nids, "%d", skip);
 
 	at_response_free(p_response);
@@ -4858,14 +4857,14 @@ static void initializeCallback(void *param)
 	/*  Extended errors */
 	at_send_command("AT+CMEE=1", NULL);
 
+	/*  detailed rings, service reporting */
+	at_send_command("AT+CRC=1;+CR=1", NULL);
+
 	/*  Alternating voice/data off */
 	at_send_command("AT+CMOD=0", NULL);
 
 	/*  Not muted */
 	at_send_command("AT+CMUT=0", NULL);
-
-	/*  detailed rings, unknown */
-	at_send_command("AT+CRC=1;+CR=1", NULL);
 
 	/*  caller id = yes */
 	at_send_command("AT+CLIP=1", NULL);
