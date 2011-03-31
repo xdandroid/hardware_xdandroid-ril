@@ -1295,6 +1295,28 @@ static void requestHangup(void *data, size_t datalen, RIL_Token t)
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 }
 
+static void resp2Strength(int *response, RIL_SignalStrength *rs)
+{
+	const int dbm_table[8] = {0,125,115,105,95,85,75,65};
+
+	if (isgsm) {
+		rs->GW_SignalStrength.signalStrength = response[0];
+		rs->GW_SignalStrength.bitErrorRate = response[1];
+	} else {
+		if (cdma_phone) {
+			/* 1st # is CDMA, 2nd is EVDO */
+			rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
+			rs->CDMA_SignalStrength.ecio = dbm_table[response[0]];
+			rs->EVDO_SignalStrength.dbm = dbm_table[response[1]];
+			rs->EVDO_SignalStrength.ecio = dbm_table[response[1]];
+		} else {
+			/* fake GSM mode */
+			rs->GW_SignalStrength.signalStrength = response[0]*4;
+			rs->GW_SignalStrength.bitErrorRate = 99;
+		}
+	}
+}
+
 static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 {
 	ATResponse *p_response = NULL;
@@ -1335,26 +1357,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 		signalStrength[1] = 0;
 	}
 
-	if (isgsm) {
-		rs.GW_SignalStrength.signalStrength = response[0];
-		rs.GW_SignalStrength.bitErrorRate = response[1];
-	} else {
-		if(cdma_phone) {
-			if (android_rtype == RADIO_EVDO_0 ||
-				android_rtype == RADIO_EVDO_A ||
-				android_rtype == RADIO_EVDO_B) {
-				rs.EVDO_SignalStrength.dbm = response[0];
-				rs.EVDO_SignalStrength.ecio = response[1];
-			} else {
-				rs.CDMA_SignalStrength.dbm = response[0];
-				rs.CDMA_SignalStrength.ecio = response[1];
-			}
-		} else {
-			/* fake GSM mode */
-			rs.GW_SignalStrength.signalStrength = response[0]*2;
-			rs.GW_SignalStrength.bitErrorRate = 99;
-		}
-	}
+	resp2Strength(response, &rs);
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, &rs, sizeof(rs));
 	return;
@@ -2584,8 +2587,8 @@ static void unsolicitedRSSI(const char * s)
 {
 	int err;
 	int response[2];
-	char * line = NULL, *origline;
 	const unsigned char asu_table[5]={0,3,5,8,12};
+	char * line = NULL, *origline;
 	RIL_SignalStrength rs = {{-1,-1},{-1,-1},{-1,-1,-1}};
 
 	origline = strdup(s);
@@ -2611,26 +2614,7 @@ static void unsolicitedRSSI(const char * s)
 	signalStrength[1]=response[1];
 	free(origline);
 
-	if (isgsm) {
-		rs.GW_SignalStrength.signalStrength = response[0];
-		rs.GW_SignalStrength.bitErrorRate = response[1];
-	} else {
-		if(cdma_phone) {
-			if (android_rtype == RADIO_EVDO_0 ||
-				android_rtype == RADIO_EVDO_A ||
-				android_rtype == RADIO_EVDO_B) {
-				rs.EVDO_SignalStrength.dbm = response[0];
-				rs.EVDO_SignalStrength.ecio = response[1];
-			} else {
-				rs.CDMA_SignalStrength.dbm = response[0];
-				rs.CDMA_SignalStrength.ecio = response[1];
-			}
-		} else {
-			/* fake GSM mode */
-			rs.GW_SignalStrength.signalStrength = response[0]*2;
-			rs.GW_SignalStrength.bitErrorRate = 99;
-		}
-	}
+	resp2Strength(response, &rs);
 
 	RIL_onUnsolicitedResponse(RIL_UNSOL_SIGNAL_STRENGTH, &rs, sizeof(rs));
 	return;
@@ -3894,10 +3878,7 @@ static void requestCdmaSubscription(RIL_Token t) {
 	err = at_tok_start(&line);
 	if (err < 0) goto error;
 
-	err = at_tok_nextstr(&line, &p);
-	if (err < 0) goto error;
-
-	p += sizeof("C826030100")-1;
+	p = line + sizeof("C826030100")-1;
 	p[8] = '\0';
 	LOGD("Hex SID/NID: %s\n", p);
 	/* values are little endian */
