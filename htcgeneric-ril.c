@@ -172,6 +172,7 @@ static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CD
 static int cdma_phone=0;	/* Set to 1 if Android is set to CDMA mode */
 static char erisystem[50];
 static char erishort[50];
+static char operid[12];
 static char *callwaiting_num;
 static int countValidCalls=0;
 static int signalStrength[2];
@@ -1946,7 +1947,41 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	else {
 		response[0]=erisystem;
 		response[1]=erishort;
-		response[2]="310995";
+		if (cdma_phone) {
+			if (!operid[0]) {
+				char *line, *p;
+				err = at_send_command_singleline("AT+HTC_SRV_STATUS?", "+HTC_SRV_STATUS:",
+					&p_response);
+				if (err != 0) goto error;
+
+				line = p_response->p_intermediates->line;
+
+				/* 0,2,"0310000" */
+				err = at_tok_start(&line);
+				if (err < 0) goto error;
+
+				err = at_tok_nextint(&line, &skip);
+				if (err < 0) goto error;
+
+				err = at_tok_nextint(&line, &skip);
+				if (err < 0) goto error;
+
+				err = at_tok_nextstr(&line, &p);
+				if (err < 0) goto error;
+
+				/* 3 digit MCC, 2 or 3 digit MNC
+				 * Note: India has 5-digit MNCs
+				 */
+				if (p[0] == '0') p++;
+				strncpy(operid, p, 3);
+				p += 3;
+				if (p[0] == '0') p++;
+				strcpy(operid+3, p);
+			}
+			response[2] = operid;
+		} else {
+			response[2]="310995";
+		}
 	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
@@ -2972,6 +3007,7 @@ static void  unsolicitedERI(const char *s) {
 	char *line, *origline;
 	int temp;
 	char *newEri;
+	char olderi[50];
 
 	origline = strdup(s);
 	line = origline;
@@ -2987,6 +3023,7 @@ static void  unsolicitedERI(const char *s) {
 	at_tok_nextint(&line, &temp);
 	at_tok_nextstr(&line, &newEri);
 
+	strcpy(olderi, erisystem);
 	if(strlen(newEri)<50)
 		strcpy(erisystem,newEri);
 	line = strchr(newEri, ' ');
@@ -2996,6 +3033,8 @@ static void  unsolicitedERI(const char *s) {
 	} else {
 		strcpy(erishort, erisystem);
 	}
+	if (strcmp(olderi, erisystem))
+		operid[0] = '\0';
 
 	free(origline);
 }
