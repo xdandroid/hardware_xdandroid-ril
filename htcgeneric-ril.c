@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <alloca.h>
@@ -184,6 +185,8 @@ static int calling_data=0;	/* are we in the process of setting up data? */
 static char imei[16+4];
 static char home_sid[sizeof("32767")] = "0";
 static int audio_on = 0;	/* is the audio on? */
+
+static pid_t pppd_pid = 0;
 
 static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
 static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
@@ -2166,6 +2169,26 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
+#ifdef NOT_YET
+	/* Android /system/bin/pppd only takes options from env or cmdline */
+	{
+		char *ppp_args[] = {
+			"defaultroute", "local", "usepeerdns", "noipdefault", "nodetach",
+			"unit", "0", "user", user, "password", pass, NULL};
+		char envargs[65536], *tail = envargs;
+		int i;
+		/* Hex encode the arguments using [A-P] instead of [0-9A-F] */
+		for (i=0; ppp_args[i]; i++) {
+			char *p = ppp_args[i];
+			do {
+				*tail++ = 'A' + ((*p >> 4) & 0x0f);
+				*tail++ = 'A' + (*p & 0x0f);
+			} while (*p++);
+		}
+		*tail = 0;
+		setenv("envargs", envargs, 1);
+	}
+#else
 	asprintf(&userpass, "%s * %s\n", user, pass);
 	len = strlen(userpass);
 	fd = open("/etc/ppp/pap-secrets",O_WRONLY);
@@ -2205,6 +2228,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	fprintf(pppconfig,"user %s\n",user);
 	fclose(pppconfig);
 	free(buffer);
+#endif
 
 	// The modem replies immediately even if it's not connected!
 	// so wait a short time.
