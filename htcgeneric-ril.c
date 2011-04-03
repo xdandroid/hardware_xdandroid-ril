@@ -1375,23 +1375,19 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static char lastDtmf;
+
 static void requestDtmfStart(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
-	char *cmd;
-	char c;
+	char cmd[sizeof("AT$VTS=*,1")];
 
 	assert (datalen >= sizeof(char *));
 
-	c = ((char *)data)[0];
-	at_send_command("AT+CMUT=1", NULL);
-	asprintf(&cmd, "AT+VTS=%c", (int)c);
-	if(c=='*')
-		at_send_command("AT+WFSH", NULL); //FIXME: what is this for??? send flash? doesn't make sense
+	lastDtmf = ((char *)data)[0];
+	sprintf(cmd, "AT$VTS=%c,1", (int)lastDtmf);
 
 	err = at_send_command(cmd, NULL);
-	free(cmd);
-
 	if (err != 0) goto error;
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
@@ -1406,11 +1402,13 @@ error:
 static void requestDtmfStop(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
+	char cmd[sizeof("AT$VTS=*,0")];
 
-	/* Send a command to cancel the DTMF tone*/
-	err = at_send_command("AT", NULL);
-	if (err != 0) goto error;
-	err = at_send_command("AT+CMUT=0", NULL);
+	assert (datalen >= sizeof(char *));
+
+	sprintf(cmd, "AT$VTS=%c,0", lastDtmf);
+
+	err = at_send_command(cmd, NULL);
 	if (err != 0) goto error;
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
@@ -1425,14 +1423,13 @@ error:
 static void requestSetMute(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
-	char *cmd;
+	char cmd[sizeof("AT+CMUT=1")];
 
 	assert (datalen >= sizeof(int *));
 
-	asprintf(&cmd, "AT+CMUT=%d", ((int*)data)[0]);
+	sprintf(cmd, "AT+CMUT=%d", ((int*)data)[0] != 0);
 
 	err = at_send_command(cmd, NULL);
-	free(cmd);
 
 	if (err != 0) goto error;
 
@@ -3434,10 +3431,10 @@ static void requestSeparateConnection(void * data, size_t datalen, RIL_Token t)
 static void requestDTMF(void * data, size_t datalen, RIL_Token t)
 {
 	int err = 0;
-	char c = ((char *)data)[0];
-	char *cmd;
+	char cmd[sizeof("AT$VTS=*,1")];
 
-	asprintf(&cmd, "AT+VTS=%c", (int)c);
+	lastDtmf = ((char *)data)[0];
+	sprintf(cmd, "AT$VTS=%c,1", (int)lastDtmf);
 
 	err = at_send_command(cmd, NULL);
 	if(err < 0){
@@ -3447,7 +3444,6 @@ static void requestDTMF(void * data, size_t datalen, RIL_Token t)
 		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 	}
 
-	free(cmd);
 	return;
 }
 
