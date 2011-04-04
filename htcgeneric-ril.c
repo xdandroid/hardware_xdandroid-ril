@@ -4014,6 +4014,62 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static void requestCdmaSetRoamingPref(void *data, size_t datalen, RIL_Token t) {
+	int err;
+	char cmd[sizeof("AT+HTC_PSS=255,3")], *str;
+	int pref;
+
+	pref = ((int *)data)[0];
+	switch (pref) {
+	case 0: str="1,2"; break;
+	case 1: str="2,3"; break;
+	case 2: str="255,3"; break;
+	default: goto error;
+	}
+
+	sprintf(cmd, "AT+HTC_PSS=%s", str);
+	err = at_send_command(cmd, NULL);
+	if (err !=0) goto error;
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+	return;
+
+error:
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
+static void requestCdmaQueryRoamingPref(RIL_Token t) {
+	int err, pref;
+	ATResponse *p_response = NULL;
+	char *line, *p;
+
+	err = at_send_command_singleline("AT+HTC_PSS?", "+HTC_PSS:", &p_response);
+	if (err != 0) goto error;
+
+	/* returns x,y */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	p = line+1;
+	if (!strcmp(p, "255,3"))
+		pref = 2;
+	else if (!strcmp(p, "1,2"))
+		pref = 0;
+	else if (!strcmp(p, "2,3"))
+		pref = 1;
+	else goto error;	/* no idea */
+
+	at_response_free(p_response);
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, &pref, sizeof(int *));
+	return;
+
+error:
+	at_response_free(p_response);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
 static void neighborRSSI(void *s) {
 	unsolicitedRSSI(s);
 	free(s);
@@ -4538,6 +4594,14 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
 			break;
 
+		case RIL_REQUEST_CDMA_SET_ROAMING_PREFERENCE:
+			requestCdmaSetRoamingPref(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CDMA_QUERY_ROAMING_PREFERENCE:
+			requestCdmaQueryRoamingPref(t);
+			break;
+
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
 			requestNotSupported(t, request);
 			break;
@@ -4961,6 +5025,7 @@ static void initializeCallback(void *param)
 	at_send_command("AT+CLIR=0", NULL);
 
 #if 0
+	at_send_command("AT+HTCmaskW1=4294967295,14449", NULL);
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
 	/* List all supported commands */
