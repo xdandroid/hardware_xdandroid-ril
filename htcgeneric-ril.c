@@ -1807,7 +1807,6 @@ static void requestRegistrationState(int request, void *data,
 				radiotype = RADIO_UNKNOWN;
 		}
 	} else {
-		count = 14;
 		if (radiotype == 2)	/* 1xRTT */
 			radiotype=RADIO_1xRTT;
 		else if (radiotype == 3)	/* EvDO 0 */
@@ -1821,8 +1820,9 @@ static void requestRegistrationState(int request, void *data,
 		else if (radiotype == -1)	/* unknown */
 			radiotype = RADIO_UNKNOWN;
 
-		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE &&
-			(regstate == REG_HOME || regstate == REG_ROAM)) {
+		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE) {
+			count = 14;
+		if (regstate == REG_HOME || regstate == REG_ROAM) {
 			char *line_bs;
 
 			/* returns SYSTYPE which we already have, ERIIND which
@@ -1847,6 +1847,8 @@ static void requestRegistrationState(int request, void *data,
 				responseStr[5]++;
 			err = at_tok_nextstr(&line_bs, &responseStr[6]);
 			if (err < 0) goto error;
+			if (responseStr[6][0] == '+')
+				responseStr[6]++;
 			responseStr[7] = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
 			responseStr[10] = "128";/* FIXME: Roaming Indicator */
 			responseStr[11] = "1";	/* FIXME: current system in PRL? */
@@ -1855,6 +1857,7 @@ static void requestRegistrationState(int request, void *data,
 		} else {
 			for (i=4; i<14; i++)
 				responseStr[i] = NULL;
+		}
 		}
 	}
 	sprintf(sstate, "%d", regstate);
@@ -4956,6 +4959,13 @@ static void initializeCallback(void *param)
 
 	/*  don't hide outgoing callerID */
 	at_send_command("AT+CLIR=0", NULL);
+
+#if 0
+	/* Show battery strength */
+	at_send_command("AT+CBC", NULL);
+	/* List all supported commands */
+	at_send_command("AT+CLAC", NULL);
+#endif
 
 	/*  bring up the device, also resets the stack. Don't do this! Handled elsewhere */
 //	at_send_command("AT+CFUN=1", NULL);
