@@ -3350,16 +3350,13 @@ static void requestSTKSetProfile(void * data, size_t datalen, RIL_Token t)
 
 static void requestLastFailCause(RIL_Token t)
 {
-	ATResponse *p_response = NULL;
 	int err = 0;
 	int response = 0;
 	char *tmp = NULL;
-	char *line = NULL;
+	char *line, *origline;
 
-	err = at_send_command_singleline("AT+CEER", "+CEER:", &p_response);
-	if(err < 0 || p_response->success == 0) goto error;
+	line = origline = at_get_last_error();
 
-	line = p_response->p_intermediates->line;
 	err = at_tok_start(&line);
 	if(err < 0) goto error;
 
@@ -3369,12 +3366,12 @@ static void requestLastFailCause(RIL_Token t)
 	err = at_tok_nextint(&line, &response);
 	if(err < 0) goto error;
 
+	free(origline);
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
-	at_response_free(p_response);
 	return;
 
 error:
-	at_response_free(p_response);
+	free(origline);
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 

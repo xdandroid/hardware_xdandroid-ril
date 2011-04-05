@@ -85,6 +85,7 @@ static ATCommandType s_type;
 static const char *s_responsePrefix = NULL;
 static const char *s_smsPDU = NULL;
 static ATResponse *sp_response = NULL;
+static char *s_last_errmsg = NULL;
 
 static void (*s_onTimeout)(void) = NULL;
 static void (*s_onReaderClosed)(void) = NULL;
@@ -790,7 +791,25 @@ static int at_send_command_full_nolock (const char *command, ATCommandType type,
 error:
     clearPendingCommand();
 
+	/* Have to save the error message right away */
+	if (pp_outResponse && !(*pp_outResponse)->success && !err && !strncmp(command, "ATD", 3)) {
+		ATResponse *err_resp;
+		err = at_send_command_full_nolock("AT+CEER", SINGLELINE, "+CEER:", NULL,
+			timeoutMsec, &err_resp);
+		if (!err) {
+			free(s_last_errmsg);
+			s_last_errmsg = strdup(err_resp->p_intermediates->line);
+			at_response_free(err_resp);
+		}
+	}
     return err;
+}
+
+char *at_get_last_error()
+{
+	char *res = s_last_errmsg;
+	s_last_errmsg = NULL;
+	return res;
 }
 
 /**

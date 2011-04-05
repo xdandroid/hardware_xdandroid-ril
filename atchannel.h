@@ -109,6 +109,8 @@ int at_send_command_sms (const char *command, const char *pdu,
 
 void at_response_free(ATResponse *p_response);
 
+char *at_get_last_error();
+
 typedef enum {
     CME_ERROR_NON_CME = -1,
     CME_SUCCESS = 0,
