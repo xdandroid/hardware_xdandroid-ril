@@ -1420,6 +1420,41 @@ error:
 
 }
 
+static void requestCdmaBurstDtmf(void *data, size_t datalen, RIL_Token t)
+{
+	int err, dur = 0;
+	char cmd[sizeof("AT+VTS=*,999")], *c;
+
+	assert (datalen >= sizeof(char *));
+
+	/* There are actually 3 parameters, 3rd is off time.
+	 * Not implemented here.
+	 */
+	if (datalen > sizeof(char *)) {
+		c = ((char **)data)[1];
+		if (sscanf(c, "%d", &dur) != 1)
+			goto error;
+	}
+	c = ((char **)data)[0];
+	while (*c) {
+		if (dur)
+			sprintf(cmd, "AT+VTS=%c,%d", *c, dur);
+		else
+			sprintf(cmd, "AT+VTS=%c", *c);
+
+		err = at_send_command(cmd, NULL);
+		if (err != 0) goto error;
+		c++;
+	}
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+	return;
+
+error:
+	LOGE("ERROR: requestCdmaBurstDtmf failed");
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
 static void requestSetMute(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
@@ -4612,6 +4647,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 		case RIL_REQUEST_CDMA_QUERY_ROAMING_PREFERENCE:
 			requestCdmaQueryRoamingPref(t);
+			break;
+
+		case RIL_REQUEST_CDMA_BURST_DTMF:
+			requestCdmaBurstDtmf(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
