@@ -49,6 +49,8 @@
 /* pathname returned from RIL_REQUEST_SETUP_DATA_CALL / RIL_REQUEST_SETUP_DEFAULT_PDP */
 #define PPP_TTY_PATH "ppp0"
 
+#define PPP_CHILD	0
+
 #ifdef USE_TI_COMMANDS
 
 // Enable workaround for bug in (TI-based) HTC stack
@@ -683,10 +685,17 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	}
 
 	// make sure pppd is still running, invalidate datacall if it isn't
+#ifdef PPP_CHILD
+	if (pppd_pid && waitpid(pppd_pid, NULL, WNOHANG) == 0)
+	{
+		pppd_pid = 0;
+	}
+#else
 	if ((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0)
 	{
 		close(fd);
 	}
+#endif
 	else
 	{
 		responses[0].active = 0;
@@ -2216,6 +2225,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	int retry = 10;
 	char *response[3] = { "1", PPP_TTY_PATH, "255.255.255.255" };
 	int mypppstatus;
+	pid_t pid;
 
 	apn = ((const char **)data)[2];
 	user = ((char **)data)[3];
@@ -2284,14 +2294,20 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-#ifdef NOT_YET
+#ifdef PPP_CHILD
+	sleep(2);
+	pid = fork();
+	if (pid == 0) {
 	/* Android /system/bin/pppd only takes options from env or cmdline */
-	{
 		char *ppp_args[] = {
+			"/system/bin/pppd", "/dev/smd1", "debug",
 			"defaultroute", "local", "usepeerdns", "noipdefault", "nodetach",
-			"unit", "0", "user", user, "password", pass, NULL};
+			"unit", "0", "novj", "novjccomp",
+			"user", user, "password", pass, NULL};
+#if 0
 		char envargs[65536], *tail = envargs;
 		int i;
+
 		/* Hex encode the arguments using [A-P] instead of [0-9A-F] */
 		for (i=0; ppp_args[i]; i++) {
 			char *p = ppp_args[i];
@@ -2302,6 +2318,13 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		}
 		*tail = 0;
 		setenv("envargs", envargs, 1);
+		err = execl("/system/bin/pppd", "/system/bin/pppd", NULL);
+#else
+		err = execv("/system/bin/pppd", ppp_args);
+#endif
+		LOGE("pppd exec failed (%d)", err);
+	} else {
+		pppd_pid = pid;
 	}
 #else
 	asprintf(&userpass, "%s * %s\n", user, pass);
@@ -2343,7 +2366,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	fprintf(pppconfig,"user %s\n",user);
 	fclose(pppconfig);
 	free(buffer);
-#endif
 
 	// The modem replies immediately even if it's not connected!
 	// so wait a short time.
@@ -2351,6 +2373,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
 	if (mypppstatus < 0)
 		goto error;
+#endif
 	sleep(5); // allow time for ip-up to run
 	/*
 	 * We are supposed to return IP address in response[2], but this is not used by android currently
@@ -2362,6 +2385,13 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
 	ifc_close();
 	*/
+#ifdef PPP_CHILD
+	if ((err = waitpid(pppd_pid, NULL, WNOHANG) !=0)) {
+		LOGE("pppd died prematurely!");
+		pppd_pid = 0;
+		goto error;
+	}
+#endif
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	calling_data = 0;
 	return;
@@ -2379,6 +2409,20 @@ static int killConn(char *cid)
 	int fd,i=0;
 	ATResponse *p_response = NULL;
 
+#ifdef PPP_CHILD
+	for (i=0; i<10; i++) {
+		if (!pppd_pid)
+			break;
+		if ((err = waitpid(pppd_pid, NULL, WNOHANG)) != 0)
+			break;
+		sleep(3);
+	}
+	if (i==10) {
+		LOGE("pppd won't die: pid %d, error %d\n", pppd_pid, errno);
+		goto error;
+	}
+	pppd_pid = 0;
+#else
 	while((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0) {
 		if(i%5 == 0) {
 			system("killall pppd");
@@ -2389,6 +2433,7 @@ static int killConn(char *cid)
 		i++;
 		sleep(1);
 	}
+#endif
 	if (isgsm) {
 		asprintf(&cmd, "AT+CGACT=0,%s", cid);
 
