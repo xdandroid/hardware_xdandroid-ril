@@ -49,7 +49,9 @@
 /* pathname returned from RIL_REQUEST_SETUP_DATA_CALL / RIL_REQUEST_SETUP_DEFAULT_PDP */
 #define PPP_TTY_PATH "ppp0"
 
-#define PPP_CHILD	0
+#define PPP_SYS_PATH "/sys/class/net/ppp0/operstate"
+
+#define PPP_SERVICE	"pppd_gprs"
 
 #ifdef USE_TI_COMMANDS
 
@@ -685,18 +687,7 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	}
 
 	// make sure pppd is still running, invalidate datacall if it isn't
-#ifdef PPP_CHILD
-	if (pppd_pid && waitpid(pppd_pid, NULL, WNOHANG) == 0)
-	{
-		pppd_pid = 0;
-	}
-#else
-	if ((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0)
-	{
-		close(fd);
-	}
-#endif
-	else
+	if (access(PPP_SYS_PATH, F_OK))
 	{
 		responses[0].active = 0;
 	}
@@ -2304,28 +2295,15 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 			"defaultroute", "local", "usepeerdns", "noipdefault", "nodetach",
 			"unit", "0", "novj", "novjccomp",
 			"user", user, "password", pass, NULL};
-#if 0
-		char envargs[65536], *tail = envargs;
-		int i;
-
-		/* Hex encode the arguments using [A-P] instead of [0-9A-F] */
-		for (i=0; ppp_args[i]; i++) {
-			char *p = ppp_args[i];
-			do {
-				*tail++ = 'A' + ((*p >> 4) & 0x0f);
-				*tail++ = 'A' + (*p & 0x0f);
-			} while (*p++);
-		}
-		*tail = 0;
-		setenv("envargs", envargs, 1);
-		err = execl("/system/bin/pppd", "/system/bin/pppd", NULL);
-#else
 		err = execv("/system/bin/pppd", ppp_args);
-#endif
 		LOGE("pppd exec failed (%d)", err);
 	} else {
 		pppd_pid = pid;
 	}
+#elif defined(PPP_SERVICE)
+	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
+	property_set("ctl.start", userpass);
+	free(userpass);
 #else
 	asprintf(&userpass, "%s * %s\n", user, pass);
 	len = strlen(userpass);
@@ -2385,13 +2363,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
 	ifc_close();
 	*/
-#ifdef PPP_CHILD
-	if ((err = waitpid(pppd_pid, NULL, WNOHANG) !=0)) {
-		LOGE("pppd died prematurely!");
-		pppd_pid = 0;
-		goto error;
-	}
-#endif
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	calling_data = 0;
 	return;
@@ -2422,6 +2393,8 @@ static int killConn(char *cid)
 		goto error;
 	}
 	pppd_pid = 0;
+#elif defined(PPP_SERVICE)
+	property_set("ctl.stop", PPP_SERVICE);
 #else
 	while((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0) {
 		if(i%5 == 0) {
