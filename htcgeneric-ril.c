@@ -2285,74 +2285,11 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-#ifdef PPP_CHILD
-	sleep(2);
-	pid = fork();
-	if (pid == 0) {
-	/* Android /system/bin/pppd only takes options from env or cmdline */
-		char *ppp_args[] = {
-			"/system/bin/pppd", "/dev/smd1", "debug",
-			"defaultroute", "local", "usepeerdns", "noipdefault", "nodetach",
-			"unit", "0", "novj", "novjccomp",
-			"user", user, "password", pass, NULL};
-		err = execv("/system/bin/pppd", ppp_args);
-		LOGE("pppd exec failed (%d)", err);
-	} else {
-		pppd_pid = pid;
-	}
-#elif defined(PPP_SERVICE)
 	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
 	property_set("ctl.start", userpass);
 	free(userpass);
-#else
-	asprintf(&userpass, "%s * %s\n", user, pass);
-	len = strlen(userpass);
-	fd = open("/etc/ppp/pap-secrets",O_WRONLY);
-	if(fd < 0)
-		goto error;
-	write(fd, userpass, len);
-	close(fd);
-	fd = open("/etc/ppp/chap-secrets",O_WRONLY);
-	if(fd < 0)
-		goto error;
-	write(fd, userpass, len);
-	close(fd);
-	free(userpass);
-
-	pppconfig = fopen("/etc/ppp/options.smd","r");
-	if(!pppconfig)
-		goto error;
-
-	//filesize
-	fseek(pppconfig, 0, SEEK_END);
-	buffSize = ftell(pppconfig);
-	rewind(pppconfig);
-
-	//allocate memory
-	buffer = (char *) malloc (sizeof(char)*buffSize);
-	if (buffer == NULL)
-		goto error;
-
-	//read in the original file
-	len = fread (buffer,1,buffSize,pppconfig);
-	if (len != buffSize)
-		goto error;
-	fclose(pppconfig);
-
-	pppconfig = fopen("/etc/ppp/options.smd1","w");
-	fwrite(buffer,1,buffSize,pppconfig);
-	fprintf(pppconfig,"user %s\n",user);
-	fclose(pppconfig);
-	free(buffer);
-
-	// The modem replies immediately even if it's not connected!
-	// so wait a short time.
-	sleep(2);
-	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
-	if (mypppstatus < 0)
-		goto error;
-#endif
 	sleep(5); // allow time for ip-up to run
+
 	/*
 	 * We are supposed to return IP address in response[2], but this is not used by android currently
 	 */
@@ -2380,33 +2317,7 @@ static int killConn(char *cid)
 	int fd,i=0;
 	ATResponse *p_response = NULL;
 
-#ifdef PPP_CHILD
-	for (i=0; i<10; i++) {
-		if (!pppd_pid)
-			break;
-		if ((err = waitpid(pppd_pid, NULL, WNOHANG)) != 0)
-			break;
-		sleep(3);
-	}
-	if (i==10) {
-		LOGE("pppd won't die: pid %d, error %d\n", pppd_pid, errno);
-		goto error;
-	}
-	pppd_pid = 0;
-#elif defined(PPP_SERVICE)
 	property_set("ctl.stop", PPP_SERVICE);
-#else
-	while((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0) {
-		if(i%5 == 0) {
-			system("killall pppd");
-		}
-		close(fd);
-		if(i>25)
-			goto error;
-		i++;
-		sleep(1);
-	}
-#endif
 	if (isgsm) {
 		asprintf(&cmd, "AT+CGACT=0,%s", cid);
 
