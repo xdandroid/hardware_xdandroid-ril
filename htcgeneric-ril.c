@@ -3004,10 +3004,10 @@ error:
 static void  unsolicitedUSSD(const char *s)
 {
 	char *line, *linestart;
-	int typeCode, count, err, len;
+	int typeCode, count, err, len, encoding = 0;
 	char *message;
-	char *outputmessage;
-	char *responseStr[2];
+	char *outputmessage, typecode[8];
+	char *responseStr[2] = {typecode,NULL};
 
 	LOGD("unsolicitedUSSD %s\n",s);
 
@@ -3021,11 +3021,22 @@ static void  unsolicitedUSSD(const char *s)
 	if(at_tok_hasmore(&line)) {
 		err = at_tok_nextstr(&line, &message);
 		if(err < 0) goto error;
-		outputmessage = malloc(strlen(message)*2+1);
-		gsm_hex_to_bytes((cbytes_t)message,strlen(message),(bytes_t)outputmessage);
-		responseStr[1] = malloc(strlen(outputmessage)*2+1);
-		len = utf8_from_gsm8((cbytes_t)outputmessage,strlen(outputmessage),(bytes_t)responseStr[1]);
-		responseStr[1][strlen(message)/2]='\0';
+
+		if(at_tok_hasmore(&line)) {
+			err = at_tok_nextint(&line, &encoding);
+			if(err < 0) goto error;
+		}
+
+		len = strlen(message);
+		outputmessage = malloc(len/2+1);
+		gsm_hex_to_bytes((cbytes_t)message,len,(bytes_t)outputmessage);
+		responseStr[1] = malloc(len+1);
+		if ((encoding & 0xec) == 0x48) {
+			len = ucs2_to_utf8((cbytes_t)outputmessage,len/4,(bytes_t)responseStr[1]);
+		} else {
+			len = utf8_from_gsm8((cbytes_t)outputmessage,len/2,(bytes_t)responseStr[1]);
+		}
+		responseStr[1][len]='\0';
 		free(outputmessage);
 		count = 2;
 	} else {
@@ -3033,9 +3044,10 @@ static void  unsolicitedUSSD(const char *s)
 		count = 1;
 	}
 	free(linestart);
-	asprintf(&responseStr[0], "%d", typeCode);
+	sprintf(responseStr[0], "%d", typeCode & 7);
 	
 	RIL_onUnsolicitedResponse (RIL_UNSOL_ON_USSD, responseStr, count*sizeof(char*));
+	free(responseStr[1]);
 	return;
 
 error:
