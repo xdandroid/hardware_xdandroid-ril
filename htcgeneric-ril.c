@@ -16,6 +16,7 @@
  */
 
 #include <telephony/ril.h>
+#include <telephony/ril_cdma_sms.h>
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -217,6 +218,8 @@ out:
 extern char** cdma_to_gsmpdu(const char *);
 extern char* gsm_to_cdmapdu(const char *);
 extern int hex2int(const char);
+extern void decode_cdma_sms_to_ril(char *pdu, RIL_CDMA_SMS_Message *msg);
+extern int encode_cdma_sms_from_ril(RIL_CDMA_SMS_Message *msg, char *buf, int buflen);
 
 static void HexStr_to_DecInt(char *strings, unsigned int *ints)
 {
@@ -1992,6 +1995,43 @@ error:
 	LOGE("requestOperator must not return error when radio is on");
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	at_response_free(p_response);
+}
+
+static void requestCDMASendSMS(void *data, size_t datalen, RIL_Token t)
+{
+	int err, len;
+	RIL_CDMA_SMS_Message *msg;
+	RIL_SMS_Response response;
+	char sendstr[512], cmd[sizeof("AT+CMGS=255")], *line;
+	ATResponse *p_response = NULL;
+
+	msg = data;
+	len = encode_cdma_sms_from_ril(msg, sendstr, sizeof(sendstr));
+
+	sprintf(cmd, "AT+CMGS=%d", len/2);
+	err = at_send_command_sms(cmd, sendstr, "+CMGS:", &p_response);
+
+	if (err != 0 || p_response->success == 0) goto error;
+
+	memset(&response, 0, sizeof(response));
+
+	/* FIXME fill in messageRef and ackPDU */
+	line = p_response->p_intermediates->line;
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextint(&line, &response.messageRef);
+	if (err < 0) goto error;
+
+	response.ackPDU = NULL;
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(response));
+	at_response_free(p_response);
+	return;
+
+error:
+	at_response_free(p_response);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestSendSMS(void *data, size_t datalen, RIL_Token t, int request)
@@ -4491,6 +4531,14 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 			requestCdmaSubscription(t);
 			break;
 
+		case RIL_REQUEST_CDMA_SEND_SMS:
+			requestCDMASendSMS(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CDMA_SMS_ACKNOWLEDGE:
+			RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+			break;
+
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
 			requestNotSupported(t, request);
 			break;
@@ -5057,7 +5105,15 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 /*		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); */
 	} else if (strStartsWith(s, "+CMT:")) {
 		LOGD("GSM_PDU=%s\n",sms_pdu);
-		if(!isgsm) {
+		if(cdma_phone) {
+			RIL_CDMA_SMS_Message msg;
+
+			memset(&msg, 0, sizeof(msg));
+			decode_cdma_sms_to_ril((char *)sms_pdu, &msg);
+			RIL_onUnsolicitedResponse (
+					RIL_UNSOL_RESPONSE_CDMA_NEW_SMS,
+					&msg, sizeof(msg));
+		} else if(!isgsm) {
 			char **pdu;
 			pdu=cdma_to_gsmpdu(sms_pdu);
 			while(*pdu) {

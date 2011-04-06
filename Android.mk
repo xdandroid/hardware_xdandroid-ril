@@ -30,7 +30,8 @@ LOCAL_SRC_FILES:= \
     at_tok.c \
     sms.c \
     sms_gsm.c \
-    gsm.c
+    gsm.c \
+	sms_cdma.c
 
 LOCAL_SHARED_LIBRARIES := \
 	libril

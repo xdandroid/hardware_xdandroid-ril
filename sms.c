@@ -17,8 +17,7 @@
 #endif
 
 int hex2int(char c) {
-	if(c>'9') return c-'A'+10;
-	return c-'0';
+	return (c&0x0f) + ((c & 0x40) ? 9 : 0);
 }
 
 int getbit(char *s,int b) {
@@ -266,7 +265,7 @@ char *gsm_to_cdmapdu(char *msg) {
 		to[0]='0';
 		to[1]='0';
 	}
-	int length=smspdu_get_text_message(pdu, message, 256);
+	int length=smspdu_get_text_message(pdu, (unsigned char *)message, 256);
 	message[length]=0;
 	smspdu_free(pdu);
 	LOGD("GSM Message:%s To:%s\n",message,to);
