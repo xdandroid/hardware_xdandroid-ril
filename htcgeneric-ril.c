@@ -4018,9 +4018,10 @@ static void requestCdmaSubscription(RIL_Token t) {
 	at_response_free(p_response);
 
 	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
-	if (err != 0) goto error;
+	if (err < 0 || p_response->success == 0)
+		goto error;
 
-	/* returns x,x,esn,prl,x,min,x,x */
+	/* returns version,mobile-sw version,esn,prl_version,pre_only,IMSI,customer_id,pri_version */
 	line = p_response->p_intermediates->line;
 
 	err = at_tok_start(&line);
@@ -4038,10 +4039,10 @@ static void requestCdmaSubscription(RIL_Token t) {
 	strncpy(prl, p, sizeof(prl));
 	prl[sizeof(prl)-1] = '\0';
 
-	err = at_tok_nextstr(&line, &p);	/* unknown int 0 */
+	err = at_tok_nextstr(&line, &p);	/* pre_only */
 	if (err < 0) goto error;
 
-	err = at_tok_nextstr(&line, &p);	/* operator ID + MIN */
+	err = at_tok_nextstr(&line, &p);	/* IMSI: operator ID + MIN */
 	if (err < 0) goto error;
 	skip = strlen(p);
 	if (skip < 10)
@@ -4088,7 +4089,8 @@ static void requestCdmaQueryRoamingPref(RIL_Token t) {
 	char *line, *p;
 
 	err = at_send_command_singleline("AT+HTC_PSS?", "+HTC_PSS:", &p_response);
-	if (err != 0) goto error;
+	if (err < 0 || p_response->success == 0)
+		goto error;
 
 	/* returns x,y */
 	line = p_response->p_intermediates->line;
