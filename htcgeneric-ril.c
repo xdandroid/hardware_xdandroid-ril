@@ -134,6 +134,7 @@ static RIL_RadioState sState = RADIO_STATE_UNAVAILABLE;
 
 static pthread_mutex_t s_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_state_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t s_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int slow_sim=0;
 static int s_port = -1;
@@ -187,11 +188,17 @@ static int regstate;
 static int gsm_rtype=-1;
 static int gsm_selmode=-1;
 static RADIO_Types android_rtype=RADIO_UNKNOWN;
-static int calling_data=0;	/* are we in the process of setting up data? */
 static char imei[16+4];
 static int audio_on = 0;	/* is the audio on? */
 
-static pid_t pppd_pid = 0;
+typedef enum {
+	Data_Off = 0,
+	Data_Dialing,
+	Data_Connected,
+	Data_Terminated
+} Data_State;
+
+static Data_State data_state=Data_Off;
 
 static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
 static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
@@ -558,7 +565,6 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	RIL_Data_Call_Response *responses;
 	int err;
 	char status[1];
-	int fd;
 	int n = 0;
 	char *out;
 
@@ -2206,15 +2212,15 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	char *userpass;
 	int err;
 	ATResponse *p_response = NULL;
-	int fd, pppstatus,i,fd2;
+	int fd, i;
 	FILE *pppconfig;
 	size_t cur = 0;
 	ssize_t written, rlen;
 	char status[32] = {0};
 	char *buffer;
 	long buffSize, len;
-	int retry = 10;
-	char *response[3] = { "1", PPP_TTY_PATH, "255.255.255.255" };
+	char ipbuf[sizeof("255.255.255.255")];
+	char *response[3] = { "1", PPP_TTY_PATH, ipbuf };
 	int mypppstatus;
 	pid_t pid;
 
@@ -2262,10 +2268,12 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		// packet-domain event reporting
 		err = at_send_command("AT+CGEREP=1,0", NULL);
 		// Hangup anything that's happening there now
-		calling_data = 1;
+		pthread_mutex_lock(&s_data_mutex);
+		data_state = Data_Dialing;
+		pthread_mutex_unlock(&s_data_mutex);
 		err = at_send_command("AT+CGACT=0,1", NULL);
 		// Start data on PDP context 1
-		err = at_send_command_singleline("ATD*99***1#", "+PCD:", &p_response);
+		err = at_send_command("ATD*99***1#", &p_response);
 		if (err < 0 || p_response->success == 0) {
 			at_response_free(p_response);
 			goto error;
@@ -2274,7 +2282,9 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	} else {
 		//CDMA
 		err = at_send_command("AT+CFUN=1", NULL);
-		calling_data = 1;
+		pthread_mutex_lock(&s_data_mutex);
+		data_state = Data_Dialing;
+		pthread_mutex_unlock(&s_data_mutex);
 		err = at_send_command("AT+HTC_DUN=0", NULL);
 		err = at_send_command("ATH", NULL);
 		err = at_send_command("ATDT#777", &p_response);
@@ -2285,29 +2295,55 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
+	// The modem replies immediately even if it's not connected!
+	pthread_mutex_lock(&s_data_mutex);
+	i = (data_state == Data_Dialing);
+	pthread_mutex_unlock(&s_data_mutex);
+	if (!i)
+		goto error;
+	property_set("net.ppp0.local-ip", "0.0.0.0");
 	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
 	property_set("ctl.start", userpass);
 	free(userpass);
-	sleep(5); // allow time for ip-up to run
 
-	/*
-	 * We are supposed to return IP address in response[2], but this is not used by android currently
-	 */
-	/*
-	inaddr_t addr,mask;
-	unsigned int flags;
-	ifc_init();
-	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
-	ifc_close();
-	*/
+	for (i=0; i<25; i++) {
+		int ok;
+		pthread_mutex_lock(&s_data_mutex);
+		ok = (data_state == Data_Dialing);
+		pthread_mutex_unlock(&s_data_mutex);
+		if (!ok)
+			goto error;
+		/* Return the IP address too */
+		property_get("net.ppp0.local-ip", ipbuf, "0.0.0.0");
+		if (strcmp(ipbuf, "0.0.0.0"))
+			break;
+		sleep(1); // allow time for ip-up to run
+	}
+	/* pppd started, but didn't get an IP address */
+	if (i == 25) {
+		property_set("ctl.stop", PPP_SERVICE);
+		goto error;
+	}
+
+	pthread_mutex_lock(&s_data_mutex);
+	i = (data_state == Data_Dialing);
+	if (i)
+		data_state = Data_Connected;
+	pthread_mutex_unlock(&s_data_mutex);
+
+	/* We started pppd successfully, but lost the connection */
+	if (!i) {
+		property_set("ctl.stop", PPP_SERVICE);
+		goto error;
+	}
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
-	calling_data = 0;
 	return;
 
 error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
-	calling_data = 0;
-
+	pthread_mutex_lock(&s_data_mutex);
+	data_state = Data_Off;
+	pthread_mutex_unlock(&s_data_mutex);
 }
 
 static int killConn(char *cid)
@@ -2317,7 +2353,16 @@ static int killConn(char *cid)
 	int fd,i=0;
 	ATResponse *p_response = NULL;
 
-	property_set("ctl.stop", PPP_SERVICE);
+	if (access(PPP_SYS_PATH, F_OK) == 0) {
+		property_set("ctl.stop", PPP_SERVICE);
+		for (i=0; i<25; i++) {
+			sleep(1);
+			if (access(PPP_SYS_PATH, F_OK))
+				break;
+		}
+		if (i == 25)
+			goto error;
+	}
 	if (isgsm) {
 		asprintf(&cmd, "AT+CGACT=0,%s", cid);
 
@@ -2341,6 +2386,7 @@ static int killConn(char *cid)
 			at_response_free(p_response);
 		}
 	}
+	data_state = Data_Off;
 	return 0;
 
 error:
@@ -3029,6 +3075,12 @@ static void  unsolicitedERI(const char *s) {
 	line = origline;
 	at_tok_start(&line);
 
+	/* 3,1,1,0,0,0,0,Sprint,1
+	 * carrier ID, eri ID, icon_img ID,
+	 * 4 unused int params
+	 * operator name
+	 * data support
+	 */
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
 	snprintf(eriPRL, sizeof(eriPRL), "%d", temp);
@@ -5072,8 +5124,11 @@ static void initializeCallback(void *param)
 //		at_send_command("AT+BANDSET=0", NULL);
 //		at_send_command("AT+CGAATT=2,1,0", NULL);
 		at_send_command("AT+GTKC=2", NULL);
-		at_send_command("AT+2GNCELL=1", NULL);
-		at_send_command("AT+3GNCELL=1", NULL);
+		/* Unsolicited neighbor reports.
+		 * We're not leveraging them, so don't bother
+		 */
+//		at_send_command("AT+2GNCELL=1", NULL);
+//		at_send_command("AT+3GNCELL=1", NULL);
 
 	} else {
 		if (is_world_cdma)
@@ -5121,8 +5176,6 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			|| strStartsWith(s,"+CTZDST:")
 			|| strStartsWith(s,"+HTCCTZV:")) {
 		unsolicitedNitzTime(s);
-	} else if (strStartsWith(s,"+PCD:")) {
-		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 	} else if (strStartsWith(s,"+CRING:")
 			|| !strcmp(s, "2") /* RING */
 			|| !strcmp(s, "3") /* NO CARRIER */
@@ -5132,10 +5185,27 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
 		}
-		RIL_onUnsolicitedResponse (
+		err = 0;
+		if (s[0] == '3') {
+			pthread_mutex_lock(&s_data_mutex);
+			if (data_state == Data_Dialing) {
+				err = 2;
+				data_state = Data_Terminated;
+			} else if (data_state == Data_Connected) {
+				err = 1;
+				data_state = Data_Terminated;
+			}
+			pthread_mutex_unlock(&s_data_mutex);
+			if (err > 1)
+				system("killall pppd");
+		}
+		if (err < 2) {
+			RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 				NULL, 0);
-		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
+			if (err == 1)
+				RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
+		}
 	} else if (strStartsWith(s,"+XCIEV:")
 			|| strStartsWith(s,"$HTC_CSQ:")
 			|| strStartsWith(s,"+CSQ:")
