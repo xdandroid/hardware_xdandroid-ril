@@ -2295,19 +2295,14 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-	// The modem replies immediately even if it's not connected!
-	pthread_mutex_lock(&s_data_mutex);
-	i = (data_state == Data_Dialing);
-	pthread_mutex_unlock(&s_data_mutex);
-	if (!i)
-		goto error;
-	property_set("net.ppp0.local-ip", "0.0.0.0");
 	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
+	property_set("net.ppp0.local-ip", "0.0.0.0");
 	property_set("ctl.start", userpass);
 	free(userpass);
 
 	for (i=0; i<25; i++) {
 		int ok;
+		sleep(1); // allow time for ip-up to run
 		pthread_mutex_lock(&s_data_mutex);
 		ok = (data_state == Data_Dialing);
 		pthread_mutex_unlock(&s_data_mutex);
@@ -2317,7 +2312,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		property_get("net.ppp0.local-ip", ipbuf, "0.0.0.0");
 		if (strcmp(ipbuf, "0.0.0.0"))
 			break;
-		sleep(1); // allow time for ip-up to run
 	}
 	/* pppd started, but didn't get an IP address */
 	if (i == 25) {
