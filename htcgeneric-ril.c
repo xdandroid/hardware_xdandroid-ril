@@ -5197,7 +5197,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			}
 			pthread_mutex_unlock(&s_data_mutex);
 			if (err > 1)
-				system("killall pppd");
+				property_set("ctl.stop", PPP_SERVICE);
 		}
 		if (err < 2) {
 			RIL_onUnsolicitedResponse (
