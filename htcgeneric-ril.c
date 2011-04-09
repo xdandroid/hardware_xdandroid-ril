@@ -2391,7 +2391,9 @@ static int killConn(char *cid)
 	ATResponse *p_response = NULL;
 
 	if (access(PPP_SYS_PATH, F_OK) == 0) {
-		system("killall pppd");
+		/* Did we already send a kill? */
+		if (data_state != Data_Terminated)
+			system("killall pppd");
 		for (i=0; i<25; i++) {
 			sleep(1);
 			if (access(PPP_SYS_PATH, F_OK))
@@ -2748,6 +2750,23 @@ error:
 	return;
 }
 
+static int check_data() {
+	int err = 0;
+
+	pthread_mutex_lock(&s_data_mutex);
+	if (data_state == Data_Dialing) {
+		err = 2;
+		data_state = Data_Terminated;
+	} else if (data_state == Data_Connected) {
+		err = 1;
+		data_state = Data_Terminated;
+	}
+	pthread_mutex_unlock(&s_data_mutex);
+	if (err > 0)
+		system("killall pppd");
+	return err;
+}
+
 static void unsolicitedCREG(const char * s)
 {
 	int i;
@@ -2768,6 +2787,11 @@ static void unsolicitedCREG(const char * s)
 	}
 	gsm_rtype = -1;
 	gsm_selmode = -1;
+	if (regstate != REG_HOME && regstate != REG_ROAM) {
+		i = check_data();
+		if (i == 1)
+			RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
+	}
 }
 
 static void requestNotSupported(RIL_Token t, int request)
@@ -5224,17 +5248,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		}
 		err = 0;
 		if (s[0] == '3') {
-			pthread_mutex_lock(&s_data_mutex);
-			if (data_state == Data_Dialing) {
-				err = 2;
-				data_state = Data_Terminated;
-			} else if (data_state == Data_Connected) {
-				err = 1;
-				data_state = Data_Terminated;
-			}
-			pthread_mutex_unlock(&s_data_mutex);
-			if (err > 1)
-				system("killall pppd");
+			err = check_data();
 		}
 		if (err < 2) {
 			RIL_onUnsolicitedResponse (
