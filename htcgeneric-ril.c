@@ -49,6 +49,8 @@
 /* pathname returned from RIL_REQUEST_SETUP_DATA_CALL / RIL_REQUEST_SETUP_DEFAULT_PDP */
 #define PPP_TTY_PATH "ppp0"
 
+#define PPP_SYS_PATH "/sys/class/net/ppp0/operstate"
+
 #ifdef USE_TI_COMMANDS
 
 // Enable workaround for bug in (TI-based) HTC stack
@@ -195,8 +197,6 @@ typedef enum {
 } Data_State;
 
 static Data_State data_state=Data_Off;
-
-static pid_t pppd_pid = 0;
 
 static RIL_RadioState Radio_READY = RADIO_STATE_SIM_READY;
 static RIL_RadioState Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
@@ -563,7 +563,6 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	RIL_Data_Call_Response *responses;
 	int err;
 	char status[1];
-	int fd;
 	int n = 0;
 	char *out;
 
@@ -692,11 +691,7 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	}
 
 	// make sure pppd is still running, invalidate datacall if it isn't
-	if ((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0)
-	{
-		close(fd);
-	}
-	else
+	if (access(PPP_SYS_PATH, F_OK))
 	{
 		responses[0].active = 0;
 	}
@@ -2215,14 +2210,15 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	char *userpass;
 	int err;
 	ATResponse *p_response = NULL;
-	int fd, pppstatus,i,fd2;
+	int fd, i;
 	FILE *pppconfig;
 	size_t cur = 0;
 	ssize_t written, rlen;
 	char status[32] = {0};
 	char *buffer;
 	long buffSize, len;
-	char *response[3] = { "1", PPP_TTY_PATH, "255.255.255.255" };
+	char ipbuf[sizeof("255.255.255.255")];
+	char *response[3] = { "1", PPP_TTY_PATH, ipbuf };
 	int mypppstatus;
 
 	apn = ((const char **)data)[2];
@@ -2296,26 +2292,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-#ifdef NOT_YET
-	/* Android /system/bin/pppd only takes options from env or cmdline */
-	{
-		char *ppp_args[] = {
-			"defaultroute", "local", "usepeerdns", "noipdefault", "nodetach",
-			"unit", "0", "user", user, "password", pass, NULL};
-		char envargs[65536], *tail = envargs;
-		int i;
-		/* Hex encode the arguments using [A-P] instead of [0-9A-F] */
-		for (i=0; ppp_args[i]; i++) {
-			char *p = ppp_args[i];
-			do {
-				*tail++ = 'A' + ((*p >> 4) & 0x0f);
-				*tail++ = 'A' + (*p & 0x0f);
-			} while (*p++);
-		}
-		*tail = 0;
-		setenv("envargs", envargs, 1);
-	}
-#else
 	asprintf(&userpass, "%s * %s\n", user, pass);
 	len = strlen(userpass);
 	fd = open("/etc/ppp/pap-secrets",O_WRONLY);
@@ -2355,37 +2331,48 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	fprintf(pppconfig,"user %s\n",user);
 	fclose(pppconfig);
 	free(buffer);
-#endif
 
 	// The modem replies immediately even if it's not connected!
-	// so wait a short time.
-//	sleep(2);
 	pthread_mutex_lock(&s_data_mutex);
 	i = (data_state == Data_Dialing);
 	pthread_mutex_unlock(&s_data_mutex);
 	if (!i)
 		goto error;
+	property_set("net.gprs.local-ip", "0.0.0.0");
 	mypppstatus = system("/bin/pppd /dev/smd1");//Or smd7 ?
 	if (mypppstatus < 0 || WEXITSTATUS(mypppstatus))
 		goto error;
-	sleep(5); // allow time for ip-up to run
+
+	for (i=0; i<25; i++) {
+		int ok;
+		pthread_mutex_lock(&s_data_mutex);
+		ok = (data_state == Data_Dialing);
+		pthread_mutex_unlock(&s_data_mutex);
+		if (!ok)
+			goto error;
+		/* Return the IP address too */
+		property_get("net.gprs.local-ip", ipbuf, "0.0.0.0");
+		if (strcmp(ipbuf, "0.0.0.0"))
+			break;
+		sleep(1); // allow time for ip-up to run
+	}
+	/* pppd started, but didn't get an IP address */
+	if (i == 25) {
+		system("killall pppd");
+		goto error;
+	}
+
 	pthread_mutex_lock(&s_data_mutex);
 	i = (data_state == Data_Dialing);
 	if (i)
 		data_state = Data_Connected;
 	pthread_mutex_unlock(&s_data_mutex);
-	if (!i)
+
+	/* We started pppd successfully, but lost the connection */
+	if (!i) {
+		system("killall pppd");
 		goto error;
-	/*
-	 * We are supposed to return IP address in response[2], but this is not used by android currently
-	 */
-	/*
-	inaddr_t addr,mask;
-	unsigned int flags;
-	ifc_init();
-	ifc_get_info(PPP_TTY_PATH, &addr, &mask, &flags);
-	ifc_close();
-	*/
+	}
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
 	return;
 
@@ -2403,15 +2390,15 @@ static int killConn(char *cid)
 	int fd,i=0;
 	ATResponse *p_response = NULL;
 
-	while((fd = open("/etc/ppp/ppp-gprs.pid",O_RDONLY)) > 0) {
-		if(i%5 == 0) {
-			system("killall pppd");
+	if (access(PPP_SYS_PATH, F_OK) == 0) {
+		system("killall pppd");
+		for (i=0; i<25; i++) {
+			sleep(1);
+			if (access(PPP_SYS_PATH, F_OK))
+				break;
 		}
-		close(fd);
-		if(i>25)
+		if (i == 25)
 			goto error;
-		i++;
-		sleep(1);
 	}
 	if (isgsm) {
 		asprintf(&cmd, "AT+CGACT=0,%s", cid);
@@ -2436,6 +2423,7 @@ static int killConn(char *cid)
 			at_response_free(p_response);
 		}
 	}
+	data_state = Data_Off;
 	return 0;
 
 error:
@@ -3124,6 +3112,12 @@ static void  unsolicitedERI(const char *s) {
 	line = origline;
 	at_tok_start(&line);
 
+	/* 3,1,1,0,0,0,0,Sprint,1
+	 * carrier ID, eri ID, icon_img ID,
+	 * 4 unused int params
+	 * operator name
+	 * data support
+	 */
 	at_tok_nextint(&line, &temp);
 	at_tok_nextint(&line, &temp);
 	snprintf(eriPRL, sizeof(eriPRL), "%d", temp);
@@ -5167,8 +5161,11 @@ static void initializeCallback(void *param)
 //		at_send_command("AT+BANDSET=0", NULL);
 //		at_send_command("AT+CGAATT=2,1,0", NULL);
 		at_send_command("AT+GTKC=2", NULL);
-		at_send_command("AT+2GNCELL=1", NULL);
-		at_send_command("AT+3GNCELL=1", NULL);
+		/* Unsolicited neighbor reports.
+		 * We're not leveraging them, so don't bother
+		 */
+//		at_send_command("AT+2GNCELL=1", NULL);
+//		at_send_command("AT+3GNCELL=1", NULL);
 
 	} else {
 		if (is_world_cdma)
@@ -5233,9 +5230,10 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 				data_state = Data_Terminated;
 			} else if (data_state == Data_Connected) {
 				err = 1;
+				data_state = Data_Terminated;
 			}
 			pthread_mutex_unlock(&s_data_mutex);
-			if (err > 0)
+			if (err > 1)
 				system("killall pppd");
 		}
 		if (err < 2) {
