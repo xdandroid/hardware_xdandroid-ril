@@ -2238,7 +2238,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	char ipbuf[sizeof("255.255.255.255")];
 	char *response[3] = { "1", PPP_TTY_PATH, ipbuf };
 	int mypppstatus;
-	pid_t pid;
 
 	apn = ((const char **)data)[2];
 	user = ((char **)data)[3];
