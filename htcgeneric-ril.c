@@ -51,6 +51,8 @@
 
 #define PPP_SYS_PATH "/sys/class/net/ppp0/operstate"
 
+#define PPP_KILL()	system("killall pppd")
+
 #ifdef USE_TI_COMMANDS
 
 // Enable workaround for bug in (TI-based) HTC stack
@@ -191,9 +193,9 @@ static int audio_on = 0;	/* is the audio on? */
 
 typedef enum {
 	Data_Off = 0,
+	Data_Terminated,
 	Data_Dialing,
 	Data_Connected,
-	Data_Terminated
 } Data_State;
 
 static Data_State data_state=Data_Off;
@@ -2373,7 +2375,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	}
 	/* pppd started, but didn't get an IP address */
 	if (i == 25) {
-		system("killall pppd");
+		PPP_KILL();
 		goto error;
 	}
 
@@ -2385,7 +2387,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 
 	/* We started pppd successfully, but lost the connection */
 	if (!i) {
-		system("killall pppd");
+		PPP_KILL();
 		goto error;
 	}
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
@@ -2402,13 +2404,18 @@ static int killConn(char *cid)
 {
 	int err;
 	char * cmd;
-	int fd,i=0;
+	int i = 0;
 	ATResponse *p_response = NULL;
 
 	if (access(PPP_SYS_PATH, F_OK) == 0) {
 		/* Did we already send a kill? */
-		if (data_state != Data_Terminated)
-			system("killall pppd");
+		pthread_mutex_lock(&s_data_mutex);
+		if (data_state > Data_Terminated) {
+			i = 1;
+			data_state = Data_Terminated;
+		}
+		pthread_mutex_unlock(&s_data_mutex);
+		if (i) PPP_KILL();
 		for (i=0; i<25; i++) {
 			sleep(1);
 			if (access(PPP_SYS_PATH, F_OK))
@@ -2423,24 +2430,24 @@ static int killConn(char *cid)
 		err = at_send_command(cmd, &p_response);
 		free(cmd);
 
-		if (err < 0 || p_response->success == 0) {
-			at_response_free(p_response);
-			goto error;
-		}
-		at_response_free(p_response);
 	} else {
 		//CDMA
 		if (dataCallNum() >= 0) {
 			err = at_send_command("ATH", &p_response);
-
-			if (err < 0 || p_response->success == 0) {
-				at_response_free(p_response);
-				goto error;
-			}
-			at_response_free(p_response);
+		} else {
+			err = 0;
 		}
 	}
+	/* NO CARRIER is success for a hangup command */
+	if (p_response && !p_response->success) {
+		err = strcmp(p_response->finalResponse, "3");
+	}
+	at_response_free(p_response);
+	if (err)
+		goto error;
+	pthread_mutex_lock(&s_data_mutex);
 	data_state = Data_Off;
+	pthread_mutex_unlock(&s_data_mutex);
 	return 0;
 
 error:
@@ -2765,21 +2772,17 @@ error:
 	return;
 }
 
-static int check_data() {
-	int err = 0;
+static Data_State check_data() {
+	Data_State ret;
 
 	pthread_mutex_lock(&s_data_mutex);
-	if (data_state == Data_Dialing) {
-		err = 2;
+	ret = data_state;
+	if (data_state > Data_Terminated)
 		data_state = Data_Terminated;
-	} else if (data_state == Data_Connected) {
-		err = 1;
-		data_state = Data_Terminated;
-	}
 	pthread_mutex_unlock(&s_data_mutex);
-	if (err > 0)
-		system("killall pppd");
-	return err;
+	if (ret > Data_Terminated)
+		PPP_KILL();
+	return ret;
 }
 
 static void unsolicitedCREG(const char * s)
@@ -2804,7 +2807,7 @@ static void unsolicitedCREG(const char * s)
 	gsm_selmode = -1;
 	if (regstate != REG_HOME && regstate != REG_ROAM) {
 		i = check_data();
-		if (i == 1)
+		if (i == Data_Connected)
 			RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 	}
 }
@@ -5292,6 +5295,10 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		err = 0;
 		if (s[0] == '3') {
 			err = check_data();
+			if (err == Data_Connected)
+				err = 1;
+			else if (err == Data_Dialing)
+				err = 2;
 		}
 		if (err < 2) {
 			RIL_onUnsolicitedResponse (
