@@ -1406,7 +1406,10 @@ static void requestDtmfStart(void *data, size_t datalen, RIL_Token t)
 	assert (datalen >= sizeof(char *));
 
 	lastDtmf = ((char *)data)[0];
-	sprintf(cmd, "AT$VTS=%c,1", (int)lastDtmf);
+	if (isgsm)
+		sprintf(cmd, "AT$VTS=%c,1", (int)lastDtmf);
+	else
+		sprintf(cmd, "AT+VTS=%c", (int)lastDtmf);
 
 	err = at_send_command(cmd, NULL);
 	if (err != 0) goto error;
@@ -1427,7 +1430,10 @@ static void requestDtmfStop(void *data, size_t datalen, RIL_Token t)
 
 	assert (datalen >= sizeof(char *));
 
-	sprintf(cmd, "AT$VTS=%c,0", lastDtmf);
+	if (isgsm)
+		sprintf(cmd, "AT$VTS=%c,0", lastDtmf);
+	else
+		sprintf(cmd, "AT");
 
 	err = at_send_command(cmd, NULL);
 	if (err != 0) goto error;
@@ -4198,6 +4204,54 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static void requestCdmaSetVoicePriv(void *data, size_t datalen, RIL_Token t) {
+	int err;
+	char cmd[sizeof("AT+HTC_VPRIVACY=1")];
+	int pref;
+
+	pref = *(int *)data;
+	/* HTC value is inverted, 1 is off, 0 is on */
+	sprintf(cmd, "AT+HTC_VPRIVACY=%d", pref != 0);
+	/* Modem sends a confirmation, echoing the value we sent. Don't care. */
+	err = at_send_command_singleline(cmd, "+HTC_VPRIVACY:", NULL);
+	if (err !=0) goto error;
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+	return;
+
+error:
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
+static void requestCdmaGetVoicePriv(RIL_Token t) {
+	int err;
+	char cmd[sizeof("AT+HTC_VPRIVACY=1")];
+	int pref;
+	ATResponse *p_response = NULL;
+	char *line, *p;
+
+	err = at_send_command_singleline("AT+HTC_VPRIVACY=4", "+HTC_VPRIVACY:", &p_response);
+	if (err !=0) goto error;
+
+	/* returns x */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextint(&line, &pref);
+	if (err < 0) goto error;
+
+	pref = pref != 0;
+
+	/* HTC value is inverted, 1 is off, 0 is on */
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, &pref, sizeof(pref));
+	return;
+
+error:
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
 static void neighborRSSI(void *s) {
 	unsolicitedRSSI(s);
 	free(s);
@@ -4736,6 +4790,14 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 		case RIL_REQUEST_CDMA_FLASH:
 			requestCdmaFlash(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CDMA_SET_PREFERRED_VOICE_PRIVACY_MODE:
+			requestCdmaSetVoicePriv(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CDMA_QUERY_PREFERRED_VOICE_PRIVACY_MODE:
+			requestCdmaGetVoicePriv(t);
 			break;
 
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
