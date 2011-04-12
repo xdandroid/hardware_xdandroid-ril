@@ -2311,7 +2311,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	}
 
 	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
-	property_set("net.ppp0.local-ip", "0.0.0.0");
+	property_set("net.gprs.local-ip", "0.0.0.0");
 	property_set("ctl.start", userpass);
 	free(userpass);
 
@@ -2324,7 +2324,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		if (!ok)
 			goto error;
 		/* Return the IP address too */
-		property_get("net.ppp0.local-ip", ipbuf, "0.0.0.0");
+		property_get("net.gprs.local-ip", ipbuf, "0.0.0.0");
 		if (strcmp(ipbuf, "0.0.0.0"))
 			break;
 	}
