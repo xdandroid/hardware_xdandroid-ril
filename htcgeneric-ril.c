@@ -208,12 +208,27 @@ static void handle_cdma_ccwa (const char *s)
 	int err;
 	char *line, *tmp;
 
+	line = tmp = strdup(s);
+	if (cdma_phone)
+	{
+		RIL_CDMA_CallWaiting resp;
+		err = at_tok_start(&tmp);
+		if (err)
+			goto out;
+		err = at_tok_nextstr(&tmp, &resp.number);
+		if (err)
+			goto out;
+		resp.numberPresentation = strcspn(resp.number, "+0123456789") != 0;
+		resp.name = NULL;
+		RIL_onUnsolicitedResponse ( RIL_UNSOL_CDMA_CALL_WAITING,
+				&resp, sizeof(resp));
+		goto out;
+	}
 	if (callwaiting_num)
 	{
 		free(callwaiting_num);
 		callwaiting_num = NULL;
 	}
-	line = tmp = strdup(s);
 	err = at_tok_start(&tmp);
 	if (err)
 		goto out;
@@ -1062,6 +1077,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	char status[1];
 	int needRepoll = 0;
 	char *l_callwaiting_num=NULL;
+	char fake_clcc[64];
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
 	int prevIncomingOrWaitingLine;
@@ -1136,7 +1152,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	}
 
 	if (l_callwaiting_num) {
-		char fake_clcc[64];
 		int index = p_calls[countValidCalls-1].index+1;
 
 		/* Try not to use an index greater than 9 */
@@ -4115,6 +4130,28 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static void requestCdmaFlash(void *data, size_t datalen, RIL_Token t) {
+	int err;
+	char *cmd, *str;
+	int pref, len;
+
+	str = data;
+	if (str && (len = strlen(str))) {
+		cmd = alloca(sizeof("AT+HTC_SENDFLASH=") + len);
+		sprintf(cmd, "AT+HTC_SENDFLASH=%s", str);
+	} else {
+		cmd = "AT+HTC_SENDFLASH";
+	}
+	err = at_send_command(cmd, NULL);
+	if (err !=0) goto error;
+
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
+	return;
+
+error:
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+}
+
 static void neighborRSSI(void *s) {
 	unsolicitedRSSI(s);
 	free(s);
@@ -4649,6 +4686,10 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 		case RIL_REQUEST_CDMA_BURST_DTMF:
 			requestCdmaBurstDtmf(data, datalen, t);
+			break;
+
+		case RIL_REQUEST_CDMA_FLASH:
+			requestCdmaFlash(data, datalen, t);
 			break;
 
 		case RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM:
@@ -5202,6 +5243,8 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		if (strStartsWith(s,"+CCWA") && !isgsm) {
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
+			if (cdma_phone)
+				return;
 		}
 		err = 0;
 		if (s[0] == '3') {
