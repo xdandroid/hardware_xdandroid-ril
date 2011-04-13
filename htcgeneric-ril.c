@@ -138,7 +138,6 @@ static pthread_mutex_t s_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int slow_sim=0;
 static int s_port = -1;
-static int cdma_north_american_dialing = 0;
 static const char * s_device_path = NULL;
 static int          s_device_socket = 0;
 
@@ -172,6 +171,9 @@ static int s_expectAnswer = 0;
 
 static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
+
+#define MODE_GSM	1
+#define MODE_CDMA	2
 
 static int isgsm=0;
 static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
@@ -1250,10 +1252,7 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
 	}
 	writesys("audio","2");
 	audio_on = 1;
-	if(cdma_north_american_dialing && strncmp(p_dial->address, "+1", 2)==0)
-		asprintf(&cmd, "ATD%s%s;", p_dial->address+1, clir);
-	else
-		asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
+	asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
 
 	ret = at_send_command(cmd, NULL);
 
@@ -5593,6 +5592,11 @@ mainLoop(void *param)
 #ifdef RIL_SHLIB
 
 pthread_t s_tid_mainloop;
+#if 0
+/* CDMA mode is now detected dynamically, North American Dialing
+ * is handled by the Android CDMA phone framework, and slow_sim
+ * is just going to be ignored for now
+ */
 void parse_cmdline() {
 	int fd=open("/proc/cmdline", O_RDONLY);
 	char buf[1024];
@@ -5624,6 +5628,7 @@ void parse_cmdline() {
 		cdma_north_american_dialing=atoi(ptr);
 	}
 }
+#endif
 
 const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **argv)
 {
@@ -5635,13 +5640,18 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 
 	s_rilenv = env;
 
-	fd=open("/sys/class/htc_hw/radio", O_RDONLY);
-	read(fd, buffer, 32);
-	isgsm=0;
-	if(strncmp(buffer, "GSM",3)==0)
-		isgsm=1;
-	close(fd);
+	/* The GSM-enabled phones all use /dev/smd7 for mobile data. The pure-CDMA
+	 * phones (DIAM and RAPH) use /dev/smd1. rhod400/rhod500 have smd7 but also
+	 * support CDMA.
+	 */
+	if (access("/dev/smd7", F_OK)) {
+		isgsm = 1;
+	} else {
+		cdma_phone = 1;
+	}
+#if 0
 	parse_cmdline();
+#endif
 
 	while ( -1 != (opt = getopt(argc, argv, "h:p:d:s:"))) {
 		switch (opt) {
