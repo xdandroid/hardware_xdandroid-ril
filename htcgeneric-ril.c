@@ -3562,87 +3562,15 @@ static void requestDTMF(void * data, size_t datalen, RIL_Token t)
 static void requestGetIMSI(RIL_Token t)
 {
 	ATResponse *p_response = NULL;
-	char *imsi;
-	char *line;
-	char *response;
-	char *part;
 	int err;
 
-       if(isgsm) { 
-               int loop = 0;
-               int success = 0;
-               /* We are looping here because the command fails on the first try.
-                   What needs to be done, is to trap the "+CME ERROR: 14" which means
-                   SIM BUSY and retry that. As a workaround for now, simply try, wait
-                   1 second, and try again, until a valid result is obtained. Usually only
-                   takes 2 tries.
-                */
-               while ( loop < 10) {
-                 err = at_send_command_numeric("AT+CIMI", &p_response);
-                 if (err < 0 || p_response->success == 0) {
-                  sleep(1);
-                  loop++;
-                 }
-                 else {
-                  loop=10;
-                  success=1;
-                 }
-               }
-
-/*             if (err < 0 || p_response->success == 0 ) */
-               if (success == 0)
-			goto error;
-		imsi = strdup(p_response->p_intermediates->line);
+	err = at_send_command_numeric("AT+CIMI", &p_response);
+	if (err < 0 || p_response->success == 0) {
+		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 	} else {
-		/* Disable this until CDMA uses the real IMSI */
-#if 0
-		err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
-
-		if (err < 0 || p_response->success == 0)
-			goto error;
-		line = p_response->p_intermediates->line;
-
-		at_tok_start(&line);
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0)
-			goto error;
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0)
-			goto error;
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0)
-			goto error;
-
-		part = strdup(response);
-
-		at_response_free(p_response);
-		free (part);
-
-		err = at_send_command_singleline("AT+CNUM", "+CNUM:", &p_response);
-
-		if (err < 0 || p_response->success == 0)
-			goto error;
-		line = p_response->p_intermediates->line;
-
-		at_tok_start(&line);
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0)
-			goto error;
-		err = at_tok_nextstr(&line, &response);
-		if (err < 0)
-			goto error;
-#endif
-		//FIXME make it work with the real IMSI: asprintf(&imsi, "%s%s", part, response); //Real opID
-		asprintf(&imsi, "310995000000000"); //Fake opID
-
+		RIL_onRequestComplete(t, RIL_E_SUCCESS,
+			p_response->p_intermediates->line, sizeof(char *));
 	}
-
-	RIL_onRequestComplete(t, RIL_E_SUCCESS, imsi, sizeof(char *));
-	free (imsi);
-	at_response_free(p_response);
-	return;
-error:
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	at_response_free(p_response);
 }
 
@@ -4979,7 +4907,7 @@ setRadioState(RIL_RadioState newState)
 	}
 }
 
-/** returns one of RIM_SIM_*. Returns RIL_SIM_NOT_READY on error */
+/** returns one of RIL_SIM_*. Returns RIL_SIM_NOT_READY on error */
 	static SIM_Status
 getSIMStatus()
 {
@@ -5045,6 +4973,25 @@ getSIMStatus()
 			/* we're treating unsupported lock types as "sim absent" */
 			ret = SIM_ABSENT;
 			goto done;
+		} else {
+			/* Is it really ready? Not until it can tell us what
+			 * its IMSI is
+			 */
+			ATResponse *resp2 = NULL;
+			int i;
+			for (i=0; i<10; i++) {
+				err = at_send_command_numeric("AT+CIMI", &resp2);
+				if (err < 0 || !resp2->success)
+					err = -1;
+				at_response_free(resp2);
+				if (err >= 0)
+					break;
+				sleep(2);
+			}
+			if (i == 10) {
+				ret = SIM_NOT_READY;
+				goto done;
+			}
 		}
 
 		at_response_free(p_response);
