@@ -5456,7 +5456,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	 * phones (DIAM and RAPH) use /dev/smd1. rhod400/rhod500 have smd7 but also
 	 * support CDMA.
 	 */
-	if (access("/dev/smd7", F_OK)) {
+	if (access("/dev/smd7", F_OK) == 0) {
 		phone_has = MODE_GSM;
 		phone_is = MODE_GSM;
 	} else {
