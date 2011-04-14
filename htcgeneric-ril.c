@@ -177,7 +177,6 @@ static void setRadioState(RIL_RadioState newState);
 
 static int phone_has = 0;	/* Modes that the phone hardware supports */
 static int phone_is  = 0;	/* Mode the phone is in */
-static int isgsm=0;
 
 static char erisystem[50];
 static char erishort[50];
@@ -417,28 +416,94 @@ static void onRadioPowerOn()
 	/*  TI specific -- enable NITZ unsol notifs */
 	at_send_command("AT%CTZV=1", NULL);
 #endif
-	if(isgsm)
+	if(phone_is == MODE_GSM)
 	{
-		at_send_command("ATE0", NULL);
-		at_send_command("AT+CLIP=1", NULL);
-		at_send_command("AT+CLIR=0", NULL);
+		at_send_command("AT+FCLASS=0", NULL);
+
+		/*  SMS PDU mode */
+		at_send_command("AT+CMGF=0", NULL);
+
+		/*  HEX character set */
+		at_send_command("AT+CSCS=\"HEX\"", NULL);
+
+		/*  +CSSU unsolicited supp service notifications */
+		at_send_command("AT+CSSN=1,1", NULL);
+
+		/*  No connected line identification */
+		at_send_command("AT+COLP=0", NULL);
+
+		/*  Call Waiting notifications */
+		at_send_command("AT+CCWA=1", NULL);
+
+		at_send_command("AT+CNMI=1,2,2,2,0", NULL);
+
+		/*  GPRS registration events */
+		at_send_command("AT+CGREG=2", NULL);
+
+
+		/*  USSD unsolicited */
+		at_send_command("AT+CUSD=1", NULL);
+
 		at_send_command("AT+CPPP=2", NULL);
+
+		at_send_command("AT+ENCSQ=1", NULL);
+		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
+
+		{
+			int err;
+			ATResponse *p_response;
+			/*  Network registration events */
+			err = at_send_command("AT+CREG=2", &p_response);
+			/* some handsets -- in tethered mode -- don't support CREG=2 */
+			if (err < 0 || p_response->success == 0)
+				at_send_command("AT+CREG=1", NULL);
+			at_response_free(p_response);
+		}
+
+//		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
+//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
+
+		at_send_command("AT+CHZ=0", NULL);
+		at_send_command("AT+2GNCELL=0", NULL);
+		at_send_command("AT+3GNCELL=0", NULL);
+		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
+
 		/* CNV=DTM, GPRSCLASS, HSDPA category [,HSUPA category] */
 		at_send_command("AT+HTCNV=1,12,8,5", NULL);
 
+		at_send_command("AT+HSDPA=2", NULL);
+		at_send_command("AT+HTCCTZR=1", NULL);
+		at_send_command("AT+HTCCNIV=0", NULL);
+		at_send_command("AT@HTCDORMANCYSET=3", NULL);
+		at_send_command("AT@HTCPDPFD=0", NULL);
+		at_send_command("AT+HTCAGPS=2", NULL);
+
 		/*enable ENS mode, okay to fail */
 //		at_send_command("AT+HTCENS=1", NULL);
-//		at_send_command("AT+HSDPA=1", NULL);
-		at_send_command("AT+HTCAGPS=2", NULL);
-		at_send_command("AT", NULL);
+
+		at_send_command("AT+BANDSET=0", NULL);
+		at_send_command("AT+CGAATT=2,2,0", NULL);
+
+//		at_send_command("AT+ALS=4294967295", NULL);
+
+		at_send_command("AT+GTKC=2", NULL);
+
 		at_send_command("AT+ODEN=112", NULL);
 		at_send_command("AT+ODEN=911", NULL);
-//		at_send_command("AT+ALS=4294967295", NULL);
-	}
-	if (phone_is == MODE_CDMA)
-		setRadioState(Radio_READY);
-	else
+		at_send_command("AT+ODEN=000", NULL);
+		at_send_command("AT+ODEN=08", NULL);
+		at_send_command("AT+ODEN=110", NULL);
+		at_send_command("AT+ODEN=118", NULL);
+		at_send_command("AT+ODEN=119", NULL);
+
 		pollSIMState(NULL);
+	} else {
+		at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		at_send_command("AT+ENCSQ=1", NULL);
+		at_send_command("AT@HTCPDPFD=0", NULL);
+
+		setRadioState(Radio_READY);
+	}
 }
 
 /** do post- SIM ready initialization */
@@ -449,7 +514,7 @@ static void onRadioReady()
 	/* Network registration */
 	at_send_command("AT+COPS=0", NULL);
 
-	if(isgsm) {
+	if(phone_is == MODE_GSM) {
 		/* Preferred RAT - UMTS Dualmode */
 //		at_send_command("AT+XRAT=1,2", NULL);
 
@@ -473,22 +538,15 @@ static void onRadioReady()
 		/*  Enable +CGEV GPRS event notifications, but don't buffer */
 //		at_send_command("AT+CGEREP=1,0", NULL);
 
-		/* Enable NITZ reporting */
+		/* Enable NITZ reporting - already done */
 //		at_send_command("AT+CTZU=1", NULL);
 //		at_send_command("AT+CTZR=1", NULL);
-		at_send_command("AT+HTCCTZR=1", NULL);
+//		at_send_command("AT+HTCCTZR=1", NULL);
 
 		/* Enable unsolizited RSSI reporting */
 		at_send_command("AT@HTCCSQ=1", NULL);
 
 		at_send_command_singleline("AT+CSMS=1", "+CSMS:", NULL);
-
-
-	} else {
-
-		at_send_command("AT+HTC_GPSONE=4", NULL);
-		at_send_command("AT+CLVL=102", NULL);
-		at_send_command("AT+CLVL=51", NULL);
 	}
 }
 
@@ -5017,7 +5075,8 @@ error:
 
 /**
  * Initialize everything that can be configured while we're still in
- * AT+CFUN=0
+ * AT+CFUN=0. Leave mode-specific stuff until after PowerOn, since
+ * the actual Android Phone type is only determined then.
  */
 static void initializeCallback(void *param)
 {
@@ -5096,91 +5155,15 @@ static void initializeCallback(void *param)
 	/*  don't hide outgoing callerID */
 	at_send_command("AT+CLIR=0", NULL);
 
-#if 0
+	/*  dunno, magic... */
 	at_send_command("AT+HTCmaskW1=4294967295,14449", NULL);
+
+#if 0
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
 	/* List all supported commands */
 	at_send_command("AT+CLAC", NULL);
 #endif
-
-	/*  bring up the device, also resets the stack. Don't do this! Handled elsewhere */
-//	at_send_command("AT+CFUN=1", NULL);
-
-	if(isgsm) {
-		/*  Call Waiting notifications */
-		at_send_command("AT+CCWA=1", NULL);
-
-		/*  No connected line identification */
-		at_send_command("AT+COLP=0", NULL);
-
-		/*  USSD unsolicited */
-		at_send_command("AT+CUSD=1", NULL);
-
-		/*  SMS PDU mode */
-		at_send_command("AT+CMGF=0", NULL);
-
-		at_send_command("AT+GTKC=2", NULL);
-
-		/*  +CSSU unsolicited supp service notifications */
-		at_send_command("AT+CSSN=0,1", NULL);
-
-		/*  HEX character set */
-		at_send_command("AT+CSCS=\"HEX\"", NULL);
-
-		/*  Extra stuff */
-		at_send_command("AT+FCLASS=0", NULL);
-
-               at_send_command("AT+CNMI=1,2,2,2,0", NULL);
-		at_send_command("AT+CPPP=1", NULL);
-
-
-		/*  Network registration events */
-		err = at_send_command("AT+CREG=2", &p_response);
-
-		/* some handsets -- in tethered mode -- don't support CREG=2 */
-		if (err < 0 || p_response->success == 0)
-			at_send_command("AT+CREG=1", NULL);
-
-		at_response_free(p_response);
-
-		/*  GPRS registration events */
-		at_send_command("AT+CGREG=2", NULL);
-
-               /* Disable RSSI Indicators for Now */
-               at_send_command("AT@HTCCSQ=0", NULL);
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
-		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
-		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
-		at_send_command("AT+HTCNV=1,12,8,5", NULL);
-		at_send_command("AT+HSDPA=2", NULL);
-		at_send_command("AT+HTCCNIV=0", NULL);
-//		at_send_command("AT@HTCDORMANCYSET=3", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
-		at_send_command("AT+HTCAGPS=2", NULL);
-//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
-		at_send_command("AT",NULL);
-		/* auto connect/disconnect settings */
-//		at_send_command("AT+BANDSET=0", NULL);
-//		at_send_command("AT+CGAATT=2,1,0", NULL);
-		at_send_command("AT+GTKC=2", NULL);
-		/* Unsolicited neighbor reports.
-		 * We're not leveraging them, so don't bother
-		 */
-//		at_send_command("AT+2GNCELL=1", NULL);
-//		at_send_command("AT+3GNCELL=1", NULL);
-
-	} else {
-		at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
-	}
-
-	/* assume radio is off on error */
-	if (isRadioOn() > 0) {
-		setRadioState (Radio_NOT_READY);
-	}
 }
 
 static void waitForClose()
@@ -5442,7 +5425,6 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	if (access("/dev/smd7", F_OK)) {
 		phone_has = MODE_GSM;
 		phone_is = MODE_GSM;
-		isgsm = 1;
 	} else {
 		phone_has = MODE_CDMA;
 		phone_is = MODE_CDMA;
