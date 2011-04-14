@@ -177,6 +177,7 @@ static void setRadioState(RIL_RadioState newState);
 
 static int phone_has = 0;	/* Modes that the phone hardware supports */
 static int phone_is  = 0;	/* Mode the phone is in */
+static int done_first = 0;	/* Have we done poweron once before? */
 
 static char erisystem[50];
 static char erishort[50];
@@ -440,7 +441,6 @@ static void onRadioPowerOn()
 		/*  GPRS registration events */
 		at_send_command("AT+CGREG=2", NULL);
 
-
 		/*  USSD unsolicited */
 		at_send_command("AT+CUSD=1", NULL);
 
@@ -481,8 +481,10 @@ static void onRadioPowerOn()
 		/*enable ENS mode, okay to fail */
 //		at_send_command("AT+HTCENS=1", NULL);
 
-		at_send_command("AT+BANDSET=0", NULL);
-		at_send_command("AT+CGAATT=2,2,0", NULL);
+		if (!done_first) {
+			at_send_command("AT+BANDSET=0", NULL);
+			at_send_command("AT+CGAATT=2,2,0", NULL);
+		}
 
 //		at_send_command("AT+ALS=4294967295", NULL);
 
@@ -498,12 +500,15 @@ static void onRadioPowerOn()
 
 		pollSIMState(NULL);
 	} else {
-		at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		if (!done_first) {
+			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		}
 		at_send_command("AT+ENCSQ=1", NULL);
 		at_send_command("AT@HTCPDPFD=0", NULL);
 
 		setRadioState(Radio_READY);
 	}
+	done_first = 1;
 }
 
 /** do post- SIM ready initialization */
@@ -550,6 +555,20 @@ static void onRadioReady()
 	}
 }
 
+static void setPhoneMode()
+{
+	if (phone_is == MODE_CDMA) {
+		Radio_READY = RADIO_STATE_NV_READY;
+		Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
+		LOGD("Using CDMA Phone");
+	} else {
+		Radio_READY = RADIO_STATE_SIM_READY;
+		Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
+		LOGD("Using GSM Phone");
+	}
+	setRadioState(Radio_NOT_READY);
+}
+
 static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 {
 	int onOff;
@@ -590,17 +609,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		if (!(phone_is & phone_has)) {
 			phone_is = phone_has;
 		}
-		if (phone_is == MODE_CDMA) {
-			Radio_READY = RADIO_STATE_NV_READY;
-			Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
-			LOGD("Using CDMA Phone");
-		} else {
-			Radio_READY = RADIO_STATE_SIM_READY;
-			Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
-			LOGD("Using GSM Phone");
-		}
-
-		setRadioState(Radio_NOT_READY);
+		setPhoneMode();
 	}
 
 	at_response_free(p_response);
@@ -999,6 +1008,7 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	ATResponse *p_response = NULL;
 	char cmd[sizeof("AT+CGAATT=2,1,0")];
 	const char *at_rat = NULL;
+	int newmode;
 
 	assert (datalen >= sizeof(int *));
 	rat = ((int *)data)[0];
@@ -1018,6 +1028,25 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	sprintf(cmd, "AT+XRAT=%s", at_rat);
 #else
 	LOGD("In requestSetPreferredNetworkType RAPH");
+	switch (rat) {
+		case 0:
+		case 1:
+		case 2:
+		case 3:
+			newmode = MODE_GSM; break;
+		case 4:
+		case 5:
+		case 6:
+			newmode = MODE_CDMA; break;
+		case 7:
+			newmode = phone_is; break;
+		default:
+			newmode = 0; break;	/* unknown mode */
+	}
+	if (!(newmode & phone_has)) {
+		RIL_onRequestComplete(t, RIL_E_MODE_NOT_SUPPORTED, NULL, 0);
+		return;
+	}
 	/* Note: the G1 ril uses these values. Don't know why case 0 and 2
 	 * use '2' in the middle value.
 	 */
@@ -1046,9 +1075,14 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 		goto error;
 	}
 
-	/* Register on the NW again */
-	err = at_send_command("AT+COPS=0", NULL);
-	if (err < 0) goto error;
+	if (phone_is != newmode) {
+		phone_is = newmode;
+		setPhoneMode();
+	} else {
+		/* Register on the NW again */
+		err = at_send_command("AT+COPS=0", NULL);
+		if (err < 0) goto error;
+	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, sizeof(int));
 	at_response_free(p_response);
