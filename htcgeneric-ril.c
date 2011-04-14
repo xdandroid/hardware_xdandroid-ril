@@ -1784,27 +1784,28 @@ static void requestRegistrationState(int request, void *data,
 			if((regstate == REG_HOME || regstate == REG_ROAM) && gsm_rtype == -1) {
 				ATResponse *p_response_op = NULL;
 				err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response_op);
-				/* We need to get the 4th return param */
-				int commas_op;
-				commas_op = 0;
-				char *p_op, *line_op;
-				line_op = p_response_op->p_intermediates->line;
+				if (err == 0 && p_response_op->success) {
+					/* We need to get the 4th return param */
+					int commas_op = 0;
+					char *p_op, *line_op;
+					line_op = p_response_op->p_intermediates->line;
 
-				for (p_op = line_op ; *p_op != '\0' ;p_op++) {
-					if (*p_op == ',') commas_op++;
-				}
+					for (p_op = line_op ; *p_op != '\0' ;p_op++) {
+						if (*p_op == ',') commas_op++;
+					}
 
-				if (commas_op == 3) {
-					err = at_tok_start(&line_op);
-					err = at_tok_nextint(&line_op, &skip);
-					if (err < 0) goto error;
-					err = at_tok_nextint(&line_op, &skip);
-					if (err < 0) goto error;
-					err = at_tok_nextint(&line_op, &skip);
-					if (err < 0) goto error;
-					err = at_tok_nextint(&line_op, &radiotype);
-					if (err < 0) goto error;
-					gsm_rtype = radiotype;
+					if (commas_op == 3) {
+						err = at_tok_start(&line_op);
+						err = at_tok_nextint(&line_op, &skip);
+						if (err < 0) goto error;
+						err = at_tok_nextint(&line_op, &skip);
+						if (err < 0) goto error;
+						err = at_tok_nextint(&line_op, &skip);
+						if (err < 0) goto error;
+						err = at_tok_nextint(&line_op, &radiotype);
+						if (err < 0) goto error;
+						gsm_rtype = radiotype;
+					}
 				}
 
 				at_response_free(p_response_op);
