@@ -139,7 +139,6 @@ static pthread_mutex_t s_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int slow_sim=0;
 static int s_port = -1;
-static int cdma_north_american_dialing = 0;
 static const char * s_device_path = NULL;
 static int          s_device_socket = 0;
 
@@ -174,13 +173,16 @@ static int s_expectAnswer = 0;
 static void pollSIMState (void *param);
 static void setRadioState(RIL_RadioState newState);
 
-static int isgsm=0;
-static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
-static int cdma_phone=0;	/* Set to 1 if Android is set to CDMA mode */
+#define MODE_GSM	1
+#define MODE_CDMA	2
+
+static int phone_has = 0;	/* Modes that the phone hardware supports */
+static int phone_is  = 0;	/* Mode the phone is in */
+static int done_first = 0;	/* Have we done poweron once before? */
+
 static char erisystem[50];
 static char erishort[50];
 static char operid[12];
-static char *callwaiting_num;
 static int countValidCalls=0;
 static int signalStrength[2];
 static char eriPRL[4];
@@ -210,34 +212,17 @@ static void handle_cdma_ccwa (const char *s)
 	char *line, *tmp;
 
 	line = tmp = strdup(s);
-	if (cdma_phone)
-	{
-		RIL_CDMA_CallWaiting resp;
-		err = at_tok_start(&tmp);
-		if (err)
-			goto out;
-		err = at_tok_nextstr(&tmp, &resp.number);
-		if (err)
-			goto out;
-		resp.numberPresentation = strcspn(resp.number, "+0123456789") != 0;
-		resp.name = NULL;
-		RIL_onUnsolicitedResponse ( RIL_UNSOL_CDMA_CALL_WAITING,
-				&resp, sizeof(resp));
-		goto out;
-	}
-	if (callwaiting_num)
-	{
-		free(callwaiting_num);
-		callwaiting_num = NULL;
-	}
+	RIL_CDMA_CallWaiting resp;
 	err = at_tok_start(&tmp);
 	if (err)
 		goto out;
-	err = at_tok_nextstr(&tmp, &callwaiting_num);
+	err = at_tok_nextstr(&tmp, &resp.number);
 	if (err)
 		goto out;
-	callwaiting_num = strdup(callwaiting_num);
-	LOGE("successfully set callwaiting_numn");
+	resp.numberPresentation = strcspn(resp.number, "+0123456789") != 0;
+	resp.name = NULL;
+	RIL_onUnsolicitedResponse ( RIL_UNSOL_CDMA_CALL_WAITING,
+			&resp, sizeof(resp));
 out:
 	free(line);
 }
@@ -433,28 +418,98 @@ static void onRadioPowerOn()
 	/*  TI specific -- enable NITZ unsol notifs */
 	at_send_command("AT%CTZV=1", NULL);
 #endif
-	if(isgsm)
+	if(phone_is == MODE_GSM)
 	{
-		at_send_command("ATE0", NULL);
-		at_send_command("AT+CLIP=1", NULL);
-		at_send_command("AT+CLIR=0", NULL);
+		at_send_command("AT+FCLASS=0", NULL);
+
+		/*  SMS PDU mode */
+		at_send_command("AT+CMGF=0", NULL);
+
+		/*  HEX character set */
+		at_send_command("AT+CSCS=\"HEX\"", NULL);
+
+		/*  +CSSU unsolicited supp service notifications */
+		at_send_command("AT+CSSN=1,1", NULL);
+
+		/*  No connected line identification */
+		at_send_command("AT+COLP=0", NULL);
+
+		/*  Call Waiting notifications */
+		at_send_command("AT+CCWA=1", NULL);
+
+		at_send_command("AT+CNMI=1,2,2,2,0", NULL);
+
+		/*  GPRS registration events */
+		at_send_command("AT+CGREG=2", NULL);
+
+		/*  USSD unsolicited */
+		at_send_command("AT+CUSD=1", NULL);
+
 		at_send_command("AT+CPPP=2", NULL);
+
+		at_send_command("AT+ENCSQ=1", NULL);
+		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
+
+		{
+			int err;
+			ATResponse *p_response;
+			/*  Network registration events */
+			err = at_send_command("AT+CREG=2", &p_response);
+			/* some handsets -- in tethered mode -- don't support CREG=2 */
+			if (err < 0 || p_response->success == 0)
+				at_send_command("AT+CREG=1", NULL);
+			at_response_free(p_response);
+		}
+
+//		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
+//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
+
+		at_send_command("AT+CHZ=0", NULL);
+		at_send_command("AT+2GNCELL=0", NULL);
+		at_send_command("AT+3GNCELL=0", NULL);
+		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
+
 		/* CNV=DTM, GPRSCLASS, HSDPA category [,HSUPA category] */
 		at_send_command("AT+HTCNV=1,12,8,5", NULL);
 
+		at_send_command("AT+HSDPA=2", NULL);
+		at_send_command("AT+HTCCTZR=1", NULL);
+		at_send_command("AT+HTCCNIV=0", NULL);
+		at_send_command("AT@HTCDORMANCYSET=3", NULL);
+		at_send_command("AT@HTCPDPFD=0", NULL);
+		at_send_command("AT+HTCAGPS=2", NULL);
+
 		/*enable ENS mode, okay to fail */
 //		at_send_command("AT+HTCENS=1", NULL);
-//		at_send_command("AT+HSDPA=1", NULL);
-		at_send_command("AT+HTCAGPS=2", NULL);
-		at_send_command("AT", NULL);
+
+		if (!done_first) {
+			at_send_command("AT+BANDSET=0", NULL);
+			at_send_command("AT+CGAATT=2,2,0", NULL);
+		}
+
+//		at_send_command("AT+ALS=4294967295", NULL);
+
+		at_send_command("AT+GTKC=2", NULL);
+
 		at_send_command("AT+ODEN=112", NULL);
 		at_send_command("AT+ODEN=911", NULL);
-//		at_send_command("AT+ALS=4294967295", NULL);
-	}
-	if (cdma_phone)
-		setRadioState(Radio_READY);
-	else
+		at_send_command("AT+ODEN=000", NULL);
+		at_send_command("AT+ODEN=08", NULL);
+		at_send_command("AT+ODEN=110", NULL);
+		at_send_command("AT+ODEN=118", NULL);
+		at_send_command("AT+ODEN=119", NULL);
+
 		pollSIMState(NULL);
+	} else {
+		if (!done_first) {
+			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		}
+		at_send_command("AT+ENCSQ=1", NULL);
+		at_send_command("AT@HTCPDPFD=0", NULL);
+
+		setRadioState(Radio_READY);
+	}
+	done_first = 1;
 }
 
 /** do post- SIM ready initialization */
@@ -465,7 +520,7 @@ static void onRadioReady()
 	/* Network registration */
 	at_send_command("AT+COPS=0", NULL);
 
-	if(isgsm) {
+	if(phone_is == MODE_GSM) {
 		/* Preferred RAT - UMTS Dualmode */
 //		at_send_command("AT+XRAT=1,2", NULL);
 
@@ -489,23 +544,30 @@ static void onRadioReady()
 		/*  Enable +CGEV GPRS event notifications, but don't buffer */
 //		at_send_command("AT+CGEREP=1,0", NULL);
 
-		/* Enable NITZ reporting */
+		/* Enable NITZ reporting - already done */
 //		at_send_command("AT+CTZU=1", NULL);
 //		at_send_command("AT+CTZR=1", NULL);
-		at_send_command("AT+HTCCTZR=1", NULL);
+//		at_send_command("AT+HTCCTZR=1", NULL);
 
 		/* Enable unsolizited RSSI reporting */
 		at_send_command("AT@HTCCSQ=1", NULL);
 
 		at_send_command_singleline("AT+CSMS=1", "+CSMS:", NULL);
-
-
-	} else {
-
-		at_send_command("AT+HTC_GPSONE=4", NULL);
-		at_send_command("AT+CLVL=102", NULL);
-		at_send_command("AT+CLVL=51", NULL);
 	}
+}
+
+static void setPhoneMode()
+{
+	if (phone_is == MODE_CDMA) {
+		Radio_READY = RADIO_STATE_NV_READY;
+		Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
+		LOGD("Using CDMA Phone");
+	} else {
+		Radio_READY = RADIO_STATE_SIM_READY;
+		Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
+		LOGD("Using GSM Phone");
+	}
+	setRadioState(Radio_NOT_READY);
 }
 
 static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
@@ -519,7 +581,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 	onOff = ((int *)data)[0];
 
 	if (onOff == 0 && sState != RADIO_STATE_OFF) {
-		if(isgsm || is_world_cdma)
+		if(phone_has & MODE_GSM)
 			err = at_send_command("AT+CFUN=0", &p_response);
 		else
 			err = at_send_command("AT+CFUN=66", &p_response);
@@ -540,17 +602,15 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		}
 		property_get("gsm.current.phone-type", value, "1");
 		if (value[0] == '2') {
-			cdma_phone = 1;
-			Radio_READY = RADIO_STATE_NV_READY;
-			Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
-			LOGD("Using CDMA Phone");
+			phone_is = MODE_CDMA;
 		} else {
-			Radio_READY = RADIO_STATE_SIM_READY;
-			Radio_NOT_READY = RADIO_STATE_SIM_NOT_READY;
-			LOGD("Using GSM Phone");
+			phone_is = MODE_GSM;
 		}
-
-		setRadioState(Radio_NOT_READY);
+		/* did we get a mode the phone doesn't support? */
+		if (!(phone_is & phone_has)) {
+			phone_is = phone_has;
+		}
+		setPhoneMode();
 	}
 
 	at_response_free(p_response);
@@ -584,7 +644,7 @@ static void requestOrSendDataCallList(RIL_Token *t)
 	int n = 0;
 	char *out;
 
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		err = at_send_command_multiline ("AT+CGACT?", "+CGACT:", &p_response);
 		if (err != 0 || p_response->success == 0) {
 			if (t != NULL)
@@ -703,13 +763,13 @@ static void requestOrSendDataCallList(RIL_Token *t)
 			responses[0].active = 1;
 		else
 			responses[0].active = 0;
-		responses[0].type = "";
+		responses[0].type = "IP";
 		responses[0].apn = "internet";
 		responses[0].address = "";
 	}
 
 	// make sure pppd is still running, invalidate datacall if it isn't
-	if (access(PPP_SYS_PATH, F_OK))
+	if (access(PPP_SYS_PATH, F_OK) || data_state < Data_Connected)
 	{
 		responses[0].active = 0;
 	}
@@ -774,7 +834,7 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
-
+/* This command is GSM only */
 static void requestQueryNetworkSelectionMode(
 		void *data, size_t datalen, RIL_Token t)
 {
@@ -788,7 +848,7 @@ static void requestQueryNetworkSelectionMode(
 		return;
 	}
 
-	if(isgsm) { //this command conflicts with the network status command
+	if(phone_is == MODE_GSM) { //this command conflicts with the network status command
 		if (gsm_selmode == -1) {
 			err = at_send_command_singleline("AT+COPS?", "+COPS:", &p_response);
 
@@ -949,6 +1009,7 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	ATResponse *p_response = NULL;
 	char cmd[sizeof("AT+CGAATT=2,1,0")];
 	const char *at_rat = NULL;
+	int newmode;
 
 	assert (datalen >= sizeof(int *));
 	rat = ((int *)data)[0];
@@ -968,6 +1029,25 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 	sprintf(cmd, "AT+XRAT=%s", at_rat);
 #else
 	LOGD("In requestSetPreferredNetworkType RAPH");
+	switch (rat) {
+		case 0:
+		case 1:
+		case 2:
+		case 3:
+			newmode = MODE_GSM; break;
+		case 4:
+		case 5:
+		case 6:
+			newmode = MODE_CDMA; break;
+		case 7:
+			newmode = phone_is; break;
+		default:
+			newmode = 0; break;	/* unknown mode */
+	}
+	if (!(newmode & phone_has)) {
+		RIL_onRequestComplete(t, RIL_E_MODE_NOT_SUPPORTED, NULL, 0);
+		return;
+	}
 	/* Note: the G1 ril uses these values. Don't know why case 0 and 2
 	 * use '2' in the middle value.
 	 */
@@ -996,9 +1076,14 @@ static void requestSetPreferredNetworkType(void *data, size_t datalen, RIL_Token
 		goto error;
 	}
 
-	/* Register on the NW again */
-	err = at_send_command("AT+COPS=0", NULL);
-	if (err < 0) goto error;
+	if (phone_is != newmode) {
+		phone_is = newmode;
+		setPhoneMode();
+	} else {
+		/* Register on the NW again */
+		err = at_send_command("AT+COPS=0", NULL);
+		if (err < 0) goto error;
+	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, sizeof(int));
 	at_response_free(p_response);
@@ -1077,7 +1162,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	int i;
 	char status[1];
 	int needRepoll = 0;
-	char *l_callwaiting_num=NULL;
 	char fake_clcc[64];
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
@@ -1104,13 +1188,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 			; p_cur != NULL
 			; p_cur = p_cur->p_next
 	    ) {
-		countCalls++;
-	}
-
-	if (callwaiting_num) {
-		/* This is not thread-safe.  Boo. */
-		l_callwaiting_num = callwaiting_num;
-		callwaiting_num = NULL;
 		countCalls++;
 	}
 
@@ -1150,30 +1227,6 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 		}
 		if(p_calls[countValidCalls].isVoice) // only count voice calls
 			countValidCalls++;
-	}
-
-	if (l_callwaiting_num) {
-		int index = p_calls[countValidCalls-1].index+1;
-
-		/* Try not to use an index greater than 9 */
-		if (index > 9) {
-			int i;
-
-			for (i=countValidCalls-2; i >= 0; i++) {
-				if (p_calls[i].index < 9) {
-					index = p_calls[i].index+1;
-					break;
-				}
-			}
-		}
-
-		snprintf(fake_clcc, 64, "+CLCC: %d,0,5,0,0,\"%s\",129",
-				index, l_callwaiting_num);
-		free(l_callwaiting_num);
-		err = callFromCLCCLine(fake_clcc, p_calls + countValidCalls);
-		if (err == 0) {
-			countValidCalls++;
-		}
 	}
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
@@ -1251,10 +1304,7 @@ static void requestDial(void *data, size_t datalen, RIL_Token t)
 	}
 	writesys("audio","2");
 	audio_on = 1;
-	if(cdma_north_american_dialing && strncmp(p_dial->address, "+1", 2)==0)
-		asprintf(&cmd, "ATD%s%s;", p_dial->address+1, clir);
-	else
-		asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
+	asprintf(&cmd, "ATD%s%s;", p_dial->address, clir);
 
 	ret = at_send_command(cmd, NULL);
 
@@ -1273,7 +1323,7 @@ static void requestWriteSmsToSim(void *data, size_t datalen, RIL_Token t)
 	int err;
 	ATResponse *p_response = NULL;
 
-	if(isgsm) {
+	if(phone_has & MODE_GSM) {
 
 		p_args = (RIL_SMS_WriteArgs *)data;
 
@@ -1327,22 +1377,16 @@ static void resp2Strength(int *response, RIL_SignalStrength *rs)
 	const int edbm_table[8] = {120,110,100,90,80,75,70,65};
 	const int ecio_table[8] = {200,150,130,120,110,100,90,80};
 
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		rs->GW_SignalStrength.signalStrength = response[0];
 		rs->GW_SignalStrength.bitErrorRate = response[1];
 	} else {
-		if (cdma_phone) {
-			/* 1st # is CDMA, 2nd is EVDO */
-			rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
-			rs->CDMA_SignalStrength.ecio = ecio_table[response[0]];
-			rs->EVDO_SignalStrength.dbm = edbm_table[response[1]];
-			rs->EVDO_SignalStrength.ecio = ecio_table[response[1]];
-			rs->EVDO_SignalStrength.signalNoiseRatio = response[1];
-		} else {
-			/* fake GSM mode */
-			rs->GW_SignalStrength.signalStrength = response[0]*4;
-			rs->GW_SignalStrength.bitErrorRate = 99;
-		}
+		/* 1st # is CDMA, 2nd is EVDO */
+		rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
+		rs->CDMA_SignalStrength.ecio = ecio_table[response[0]];
+		rs->EVDO_SignalStrength.dbm = edbm_table[response[1]];
+		rs->EVDO_SignalStrength.ecio = ecio_table[response[1]];
+		rs->EVDO_SignalStrength.signalNoiseRatio = response[1];
 	}
 }
 
@@ -1356,7 +1400,7 @@ static void requestSignalStrength(void *data, size_t datalen, RIL_Token t)
 
 	/* If we have no recent report, ask */
 	if(signalStrength[0] == 0 && signalStrength[1] == 0) {
-		if(isgsm)
+		if(phone_is == MODE_GSM)
 			err = at_send_command_singleline("AT+CSQ", "+CSQ:", &p_response);
 		else
 			err = at_send_command_singleline("AT+HTC_CSQ", "+HTC_CSQ:", &p_response);
@@ -1399,6 +1443,7 @@ error:
 
 static char lastDtmf;
 
+/* CDMA doesn't use these */
 static void requestDtmfStart(void *data, size_t datalen, RIL_Token t)
 {
 	int err;
@@ -1407,7 +1452,7 @@ static void requestDtmfStart(void *data, size_t datalen, RIL_Token t)
 	assert (datalen >= sizeof(char *));
 
 	lastDtmf = ((char *)data)[0];
-	if (isgsm)
+	if (phone_is == MODE_GSM)
 		sprintf(cmd, "AT$VTS=%c,1", (int)lastDtmf);
 	else
 		sprintf(cmd, "AT+VTS=%c", (int)lastDtmf);
@@ -1431,7 +1476,7 @@ static void requestDtmfStop(void *data, size_t datalen, RIL_Token t)
 
 	assert (datalen >= sizeof(char *));
 
-	if (isgsm)
+	if (phone_is == MODE_GSM)
 		sprintf(cmd, "AT$VTS=%c,0", lastDtmf);
 	else
 		sprintf(cmd, "AT");
@@ -1512,7 +1557,7 @@ static void requestGetMute(void *data, size_t datalen, RIL_Token t)
 	int response[1];
 	char *line;
 
-	if(!isgsm) {
+	if(phone_is == MODE_CDMA) {
 		err = at_send_command_singleline("AT+CMUT?", "+CMUT:", &p_response);
 	} else {
 		err = at_send_command_singleline("AT+MUT", "+CMUT:", &p_response);
@@ -1549,7 +1594,7 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 
 	if(screenState == 1)
 	{
-		if (isgsm) {
+		if (phone_is == MODE_GSM) {
 			/*
 			 if (ppt)
 			 	"AT+ENCSQ=1;\r"
@@ -1595,7 +1640,7 @@ static void requestScreenState(void *data, size_t datalen, RIL_Token t)
 
 		}
 	} else if (screenState == 0) {
-		if (isgsm) {
+		if (phone_is == MODE_GSM) {
 			/*
 				"AT+HTCPDPIDLE\r"
 			 	if (ppt)
@@ -1671,7 +1716,7 @@ static void requestRegistrationState(int request, void *data,
 
 	got_state_change = 0;
 
-	if(isgsm) {
+	if(phone_is == MODE_GSM) {
 		if (request == RIL_REQUEST_REGISTRATION_STATE) {
 			cmd = "AT+CREG?";
 			prefix = "+CREG:";
@@ -1836,7 +1881,7 @@ static void requestRegistrationState(int request, void *data,
 			goto error;
 	}
 
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		/* Now translate to 'Broken Android Speak' - can't follow the GSM spec */
 		if (radiotype == -1 && (regstate == REG_HOME || regstate == REG_ROAM))
 			radiotype = gsm_rtype;
@@ -1955,7 +2000,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 		return;
 	}
 
-	if(isgsm) {
+	if(phone_is == MODE_GSM) {
 		err = at_send_command_multiline(
 				"AT+COPS=3,0;+COPS?;+COPS=3,1;+COPS?;+COPS=3,2;+COPS?",
 				"+COPS:", &p_response);
@@ -2014,41 +2059,37 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	else {
 		response[0]=erisystem;
 		response[1]=erishort;
-		if (cdma_phone) {
-			if (!operid[0]) {
-				char *line, *p;
-				err = at_send_command_singleline("AT+HTC_SRV_STATUS?", "+HTC_SRV_STATUS:",
-					&p_response);
-				if (err != 0) goto error;
+		if (!operid[0]) {
+			char *line, *p;
+			err = at_send_command_singleline("AT+HTC_SRV_STATUS?", "+HTC_SRV_STATUS:",
+				&p_response);
+			if (err != 0) goto error;
 
-				line = p_response->p_intermediates->line;
+			line = p_response->p_intermediates->line;
 
-				/* 0,2,"0310000" */
-				err = at_tok_start(&line);
-				if (err < 0) goto error;
+			/* 0,2,"0310000" */
+			err = at_tok_start(&line);
+			if (err < 0) goto error;
 
-				err = at_tok_nextint(&line, &skip);
-				if (err < 0) goto error;
+			err = at_tok_nextint(&line, &skip);
+			if (err < 0) goto error;
 
-				err = at_tok_nextint(&line, &skip);
-				if (err < 0) goto error;
+			err = at_tok_nextint(&line, &skip);
+			if (err < 0) goto error;
 
-				err = at_tok_nextstr(&line, &p);
-				if (err < 0) goto error;
+			err = at_tok_nextstr(&line, &p);
+			if (err < 0) goto error;
 
-				/* 3 digit MCC, 2 or 3 digit MNC
-				 * Note: India has 5-digit MNCs
-				 */
-				if (p[0] == '0') p++;
-				strncpy(operid, p, 3);
-				p += 3;
-				if (p[0] == '0') p++;
-				strcpy(operid+3, p);
-			}
-			response[2] = operid;
-		} else {
-			response[2]="310995";
+			/* 3 digit MCC, 2 or 3 digit MNC
+			 * Note: India has 5-digit MNCs
+			 */
+			if (p[0] == '0') p++;
+			strncpy(operid, p, 3);
+			p += 3;
+			if (p[0] == '0') p++;
+			strcpy(operid+3, p);
 		}
+		response[2] = operid;
 	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, response, sizeof(response));
@@ -2125,72 +2166,59 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t, int request)
 	LOGI("SMSC=%s  PDU=%s",testSmsc,pdu);
 	// "NULL for default SMSC"
 	if (testSmsc == NULL) {
-		if(isgsm){
-			err = at_send_command_singleline("AT+CSCA?", "+CSCA:", &p2_response);
+		err = at_send_command_singleline("AT+CSCA?", "+CSCA:", &p2_response);
 
-			if (err < 0 || p2_response->success == 0) {
-				goto error;
-			}
-
-			line = p2_response->p_intermediates->line;
-
-			err = at_tok_start(&line);
-			if (err < 0) goto error;
-
-			err = at_tok_nextstr(&line, &temp);
-			if (err < 0) goto error;
-
-			err = at_tok_nextint(&line, &tosca);
-			if (err < 0) goto error;
-
-			if(temp[0]=='+') {
-				++temp;
-				//plus = 1;
-			}
-
-			length = strlen(temp) - plus;
-			sprintf(smsc,"%.2x%.2x",(length + 1) / 2 + 1, tosca);
-
-			for (i = 0; curChar < length - 1; i+=2 ) {
-				smsc[5+i] = temp[plus+curChar++];
-				smsc[4+i] = temp[plus+curChar++];
-			}
-
-			if ( length % 2) {//One extra number
-				smsc[4+length] = temp[curChar];
-				smsc[3+length]='F';
-				smsc[5+length]='\0';
-			} else {
-				smsc[4+length] = '\0';
-			}
-			//first = malloc(30*sizeof(byte_t));
-			//length = 2 + (gsm_bcdnum_from_ascii(temp,strlen(temp),&first)) / 2;
-			//sprintf(smsc,"%.2x%.2x%s",length,tosca,first);
-			//free(first);
+		if (err < 0 || p2_response->success == 0) {
+			goto error;
 		}
+
+		line = p2_response->p_intermediates->line;
+
+		err = at_tok_start(&line);
+		if (err < 0) goto error;
+
+		err = at_tok_nextstr(&line, &temp);
+		if (err < 0) goto error;
+
+		err = at_tok_nextint(&line, &tosca);
+		if (err < 0) goto error;
+
+		if(temp[0]=='+') {
+			++temp;
+			//plus = 1;
+		}
+
+		length = strlen(temp) - plus;
+		sprintf(smsc,"%.2x%.2x",(length + 1) / 2 + 1, tosca);
+
+		for (i = 0; curChar < length - 1; i+=2 ) {
+			smsc[5+i] = temp[plus+curChar++];
+			smsc[4+i] = temp[plus+curChar++];
+		}
+
+		if ( length % 2) {//One extra number
+			smsc[4+length] = temp[curChar];
+			smsc[3+length]='F';
+			smsc[5+length]='\0';
+		} else {
+			smsc[4+length] = '\0';
+		}
+		//first = malloc(30*sizeof(byte_t));
+		//length = 2 + (gsm_bcdnum_from_ascii(temp,strlen(temp),&first)) / 2;
+		//sprintf(smsc,"%.2x%.2x%s",length,tosca,first);
+		//free(first);
 	}
 	else
 		strcpy(smsc,testSmsc);
 	LOGI("SMSC=%s  PDU=%s",smsc,pdu);
 
-	if(!isgsm) {
-		strcpy(sendstr,"00");
-		strcat(sendstr,pdu);
-		LOGI("GSM PDU=%s",pdu);
-		cdma=gsm_to_cdmapdu(sendstr);
-		tpLayerLength = strlen(cdma)/2;
-	}
 	asprintf(&cmd1, "AT+CMGS=%d", tpLayerLength);
-	if(isgsm)
-		asprintf(&cmd2, "%s%s", smsc, pdu);
-	else
-		asprintf(&cmd2, "%s", cdma);
+	asprintf(&cmd2, "%s%s", smsc, pdu);
 
 	err = at_send_command_sms(cmd1, cmd2, "+CMGS:", &p_response);
 
 	free(cmd1);
 	free(cmd2);
-//	free(smsc);
 
 	if (err != 0 || p_response->success == 0) goto error;
 
@@ -2221,9 +2249,9 @@ static void requestSendSMS(void *data, size_t datalen, RIL_Token t, int request)
 	return;
 
 error:
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	at_response_free(p_response);
 	at_response_free(p2_response);
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
@@ -2269,7 +2297,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 	if(killConn(response[0]) < 0)
 		goto error;
 
-	if(isgsm)
+	if(phone_is == MODE_GSM)
 	{
 		if (*data[0]=='0')
 		LOGE("Android want us to connect as CDMA while we are a GSM phone !");
@@ -2278,7 +2306,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		if(*data[0]=='1')
 		LOGE("Android want us to connect as GSM while we are a CDMA phone !");
 	}
-	if(isgsm) {
+	if(phone_is == MODE_GSM) {
 		asprintf(&cmd, "AT+CGDCONT=1,\"IP\",\"%s\",,0,0", apn);
 		//FIXME check for error here
 		err = at_send_command(cmd, NULL);
@@ -2303,7 +2331,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	} else {
 		//CDMA
-		err = at_send_command("AT+CFUN=1", NULL);
 		pthread_mutex_lock(&s_data_mutex);
 		data_state = Data_Dialing;
 		pthread_mutex_unlock(&s_data_mutex);
@@ -2386,7 +2413,7 @@ static int killConn(char *cid)
 		if (i == 25)
 			goto error;
 	}
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		asprintf(&cmd, "AT+CGACT=0,%s", cid);
 
 		err = at_send_command(cmd, &p_response);
@@ -2481,94 +2508,36 @@ static void  requestSIM_IO(void *data, size_t datalen, RIL_Token t)
 				p_args->command, p_args->fileid,
 				p_args->p1, p_args->p2, p_args->p3, p_args->data);
 	}
-	if(isgsm){
-		err = at_send_command_singleline(cmd, "+CRSM:", &p_response);
+	err = at_send_command_singleline(cmd, "+CRSM:", &p_response);
+	free(cmd);
 
-		if (err < 0 || p_response->success == 0) {
-			goto error;
-		}
+	if (err < 0 || p_response->success == 0) {
+		goto error;
+	}
 
-		line = p_response->p_intermediates->line;
+	line = p_response->p_intermediates->line;
 
-		err = at_tok_start(&line);
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextint(&line, &(sr.sw1));
+	if (err < 0) goto error;
+
+	err = at_tok_nextint(&line, &(sr.sw2));
+	if (err < 0) goto error;
+
+	if (at_tok_hasmore(&line)) {
+		err = at_tok_nextstr(&line, &(sr.simResponse));
 		if (err < 0) goto error;
-
-		err = at_tok_nextint(&line, &(sr.sw1));
-		if (err < 0) goto error;
-
-		err = at_tok_nextint(&line, &(sr.sw2));
-		if (err < 0) goto error;
-
-		if (at_tok_hasmore(&line)) {
-			err = at_tok_nextstr(&line, &(sr.simResponse));
-			if (err < 0) goto error;
-		}
-	} else {
-		//CDMA
-		if(p_args->fileid != 0x6f40) {
-			LOGE("SIM IO Request: %s\n", cmd);
-			RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
-			at_response_free(p_response);
-			free(cmd);
-			return;
-		} else { //Asking for the MSISDN or phone number. 1+ bytes alpha id (leave null), 1 byte length of bcd number (set to 11), 1 byte TON/NPI (set to FF), 10 byte phone num, 1 byte capability id, 1 byte extension id
-			sr.sw1=144;
-			sr.sw2=0;
-
-			if(p_args->command == 192)
-				asprintf(&sr.simResponse,"000000806f40040011a0aa01020120");
-			else {
-				char * msid;
-				char * response;
-				int plus = 0;
-				int length;
-				int i;
-				int curChar=0;
-
-				err = at_send_command_singleline("AT+CNUM", "+CNUM:", &p_response);
-
-				if (err < 0 || p_response->success == 0)
-					goto error;
-				line = p_response->p_intermediates->line;
-
-				at_tok_start(&line);
-				err = at_tok_nextstr(&line, &response);
-				if (err < 0)
-					goto error;
-				err = at_tok_nextstr(&line, &response);
-				if (err < 0)
-					goto error;
-
-				if(response[0]=='+')
-					plus = 1;
-
-				length = strlen(response) - plus;
-				asprintf(&msid,"%.2x%.2dFFFFFFFFFFFFFFFFFFFF",(length + 1) / 2 + 1, 81 + plus * 10);
-
-				for (i = 0; curChar < length - 1; i+=2 ) {
-					msid[5+i] = response[plus+curChar++];
-					msid[4+i] = response[plus+curChar++];
-				}
-
-				if ( length % 2) //One extra number
-					msid[4+length] = response[curChar];
-
-				asprintf(&sr.simResponse,"ffffffffffffffffffffffffffffffffffff%sffff",msid);
-				free(msid);
-			}
-		}
 	}
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, &sr, sizeof(sr));
 	at_response_free(p_response);
-	free(cmd);
 	return;
 
 error:
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 	at_response_free(p_response);
-	free(cmd);
-
+	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void  requestEnterSimPin(void*  data, size_t  datalen, RIL_Token  t)
@@ -2578,32 +2547,27 @@ static void  requestEnterSimPin(void*  data, size_t  datalen, RIL_Token  t)
 	char*         cmd = NULL;
 	const char**  strings = (const char**)data;;
 
-	if(isgsm) {
-		if ( datalen == sizeof(char*) ) {
-			asprintf(&cmd, "AT+CPIN=\"%s\"", strings[0]);
-		} else if ( datalen == 2*sizeof(char*) ) {
-			asprintf(&cmd, "AT+CPIN=\"%s\",\"%s\"", strings[0], strings[1]);
-		} else
-			goto error;
+	if ( datalen == sizeof(char*) ) {
+		asprintf(&cmd, "AT+CPIN=\"%s\"", strings[0]);
+	} else if ( datalen == 2*sizeof(char*) ) {
+		asprintf(&cmd, "AT+CPIN=\"%s\",\"%s\"", strings[0], strings[1]);
+	} else
+		goto error;
 
-		err = at_send_command_singleline(cmd, "+CREG:", &p_response);
-		free(cmd);
+	err = at_send_command_singleline(cmd, "+CREG:", &p_response);
+	free(cmd);
 
-		if (err < 0 || p_response->success == 0) {
+	if (err < 0 || p_response->success == 0) {
 error:
-			RIL_onRequestComplete(t, RIL_E_PASSWORD_INCORRECT, NULL, 0);
-		} else {
-			RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-
-			/* Notify that SIM is ready */
-			setRadioState(RADIO_STATE_SIM_READY);
-		}
-		
-		at_response_free(p_response);
+		RIL_onRequestComplete(t, RIL_E_PASSWORD_INCORRECT, NULL, 0);
 	} else {
 		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+
+		/* Notify that SIM is ready */
 		setRadioState(RADIO_STATE_SIM_READY);
 	}
+	
+	at_response_free(p_response);
 }
 
 static void  requestChangeSimPin(void*  data, size_t  datalen, RIL_Token  t)
@@ -2613,26 +2577,22 @@ static void  requestChangeSimPin(void*  data, size_t  datalen, RIL_Token  t)
 	char*         cmd = NULL;
 	const char**  strings = (const char**)data;;
 
-	if(isgsm) {
-		if ( datalen == 2*sizeof(char*) )
-			asprintf(&cmd, "AT+CPWD=\"SC\",\"%s\",\"%s\"", strings[0], strings[1]);
-		else
-			goto error;
+	if ( datalen == 2*sizeof(char*) )
+		asprintf(&cmd, "AT+CPWD=\"SC\",\"%s\",\"%s\"", strings[0], strings[1]);
+	else
+		goto error;
 
-		err = at_send_command(cmd, &p_response);
-		free(cmd);
+	err = at_send_command(cmd, &p_response);
+	free(cmd);
 
-		if (err < 0 || p_response->success == 0) {
+	if (err < 0 || p_response->success == 0) {
 error:
-			RIL_onRequestComplete(t, RIL_E_PASSWORD_INCORRECT, NULL, 0);
-		}
-		else
-			RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-		
-		at_response_free(p_response);
-	} else {
-		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+		RIL_onRequestComplete(t, RIL_E_PASSWORD_INCORRECT, NULL, 0);
 	}
+	else
+		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
+	
+	at_response_free(p_response);
 }
 
 
@@ -2715,7 +2675,7 @@ static void unsolicitedRSSI(const char * s)
 		err = at_tok_nextint(&line, &(response[1]));
 		if (err < 0) goto error;
 	}
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		if (s[0] == '@')
 			response[0]=asu_table[response[0]%5];
 	}
@@ -3025,27 +2985,24 @@ static void requestSendUSSD(void *data, size_t datalen, RIL_Token t)
 	char *cmd;
 	bytes_t temp;
 	char *newUSSDRequest;
-	if(isgsm) {
-		ussdRequest = (cbytes_t)(data);
-		temp = malloc(strlen((char *)ussdRequest)*sizeof(char)+1);
-		len = utf8_to_gsm8(ussdRequest,strlen((char *)ussdRequest),temp);
-		newUSSDRequest = malloc(2*len*sizeof(char)+1);
-		gsm_hex_from_bytes(newUSSDRequest,temp, len);
-		newUSSDRequest[2*len]='\0';
-		asprintf(&cmd, "AT+CUSD=1,\"%s\",15", newUSSDRequest);
-		free(newUSSDRequest);
-		free(temp);
-		err = at_send_command(cmd, &p_response);
-		free(cmd);
-		if (err < 0 || p_response->success == 0) {
-			goto error;
-		} else {
-			RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
-		}
-		at_response_free(p_response);
+
+	ussdRequest = (cbytes_t)(data);
+	temp = malloc(strlen((char *)ussdRequest)*sizeof(char)+1);
+	len = utf8_to_gsm8(ussdRequest,strlen((char *)ussdRequest),temp);
+	newUSSDRequest = malloc(2*len*sizeof(char)+1);
+	gsm_hex_from_bytes(newUSSDRequest,temp, len);
+	newUSSDRequest[2*len]='\0';
+	asprintf(&cmd, "AT+CUSD=1,\"%s\",15", newUSSDRequest);
+	free(newUSSDRequest);
+	free(temp);
+	err = at_send_command(cmd, &p_response);
+	free(cmd);
+	if (err < 0 || p_response->success == 0) {
+		goto error;
 	} else {
-		RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
+		RIL_onRequestComplete(t, RIL_E_SUCCESS, NULL, 0);
 	}
+	at_response_free(p_response);
 	return;
 
 error:
@@ -3427,7 +3384,7 @@ static void requestSwitchWaitingOrHoldingAndActive(RIL_Token t)
 	// 3GPP 22.030 6.5.5
 	// "Places all active calls (if any exist) on hold and accepts
 	//  the other (held or waiting) call."
-	if (isgsm)
+	if (phone_is == MODE_GSM)
 		at_send_command("AT+CHLD=2", NULL);
 	else
 		at_send_command("AT+HTC_SENDFLASH", NULL);
@@ -3590,12 +3547,13 @@ static int getESNMEID(int munge)
 	return err;
 }
 
+/* Only used on GSM */
 static void requestGetIMEISV(int request, RIL_Token t)
 {
 	int err;
 	char *resp;
 
-	if(isgsm)
+	if(phone_is == MODE_GSM)
 		err = getIMEISV();
 	else
 		err = getESNMEID(1);
@@ -3616,7 +3574,7 @@ static void requestDeviceIdentity(RIL_Token t)
 	int err;
 	char *resp[4], *blank="";
 
-	if (isgsm) {
+	if (phone_is == MODE_GSM) {
 		err = getIMEISV();
 		if (err < 0)
 			goto error;
@@ -3722,7 +3680,7 @@ static void requestDeleteSMSOnSIM(void * data, size_t datalen, RIL_Token t)
 	char * cmd;
 	ATResponse *p_response = NULL;
 
-	if (isgsm) {
+	if (phone_has & MODE_GSM) {
 		asprintf(&cmd, "AT+CMGD=%d", ((int *)data)[0]);
 
 		err = at_send_command(cmd, &p_response);
@@ -4879,85 +4837,80 @@ getSIMStatus()
 		goto done;
 	}
 
-	if (isgsm)
-	{
-		err = at_send_command_singleline("AT+CPIN?", "+CPIN:", &p_response);
+	err = at_send_command_singleline("AT+CPIN?", "+CPIN:", &p_response);
 
-		if (err != 0) {
-			ret = SIM_NOT_READY;
-			goto done;
-		}
+	if (err != 0) {
+		ret = SIM_NOT_READY;
+		goto done;
+	}
 
-		switch (at_get_cme_error(p_response)) {
-			case CME_SUCCESS:
-				break;
+	switch (at_get_cme_error(p_response)) {
+		case CME_SUCCESS:
+			break;
 
-			case CME_SIM_NOT_INSERTED:
-				ret = SIM_ABSENT;
-				goto done;
-
-			default:
-				ret = SIM_NOT_READY;
-				goto done;
-		}
-
-		/* CPIN? has succeeded, now look at the result */
-
-		cpinLine = p_response->p_intermediates->line;
-		err = at_tok_start (&cpinLine);
-
-		if (err < 0) {
-			ret = SIM_NOT_READY;
-			goto done;
-		}
-
-		err = at_tok_nextstr(&cpinLine, &cpinResult);
-
-		if (err < 0) {
-			ret = SIM_NOT_READY;
-			goto done;
-		}
-
-		if (0 == strcmp (cpinResult, "SIM PIN")) {
-			ret = SIM_PIN;
-			goto done;
-		} else if (0 == strcmp (cpinResult, "SIM PUK")) {
-			ret = SIM_PUK;
-			goto done;
-		} else if (0 == strcmp (cpinResult, "PH-NET PIN")) {
-			return SIM_NETWORK_PERSONALIZATION;
-		} else if (0 != strcmp (cpinResult, "READY"))  {
-			/* we're treating unsupported lock types as "sim absent" */
+		case CME_SIM_NOT_INSERTED:
 			ret = SIM_ABSENT;
 			goto done;
-		} else {
-			/* Is it really ready? Not until it can tell us what
-			 * its IMSI is
-			 */
-			ATResponse *resp2 = NULL;
-			int i;
-			for (i=0; i<10; i++) {
-				err = at_send_command_numeric("AT+CIMI", &resp2);
-				if (err < 0 || !resp2->success)
-					err = -1;
-				at_response_free(resp2);
-				if (err >= 0)
-					break;
-				sleep(2);
-			}
-			if (i == 10) {
-				ret = SIM_NOT_READY;
-				goto done;
-			}
-		}
 
-		at_response_free(p_response);
-		p_response = NULL;
-		cpinResult = NULL;
-
-	} else {
-		//CDMA
+		default:
+			ret = SIM_NOT_READY;
+			goto done;
 	}
+
+	/* CPIN? has succeeded, now look at the result */
+
+	cpinLine = p_response->p_intermediates->line;
+	err = at_tok_start (&cpinLine);
+
+	if (err < 0) {
+		ret = SIM_NOT_READY;
+		goto done;
+	}
+
+	err = at_tok_nextstr(&cpinLine, &cpinResult);
+
+	if (err < 0) {
+		ret = SIM_NOT_READY;
+		goto done;
+	}
+
+	if (0 == strcmp (cpinResult, "SIM PIN")) {
+		ret = SIM_PIN;
+		goto done;
+	} else if (0 == strcmp (cpinResult, "SIM PUK")) {
+		ret = SIM_PUK;
+		goto done;
+	} else if (0 == strcmp (cpinResult, "PH-NET PIN")) {
+		return SIM_NETWORK_PERSONALIZATION;
+	} else if (0 != strcmp (cpinResult, "READY"))  {
+		/* we're treating unsupported lock types as "sim absent" */
+		ret = SIM_ABSENT;
+		goto done;
+	} else {
+		/* Is it really ready? Not until it can tell us what
+		 * its IMSI is
+		 */
+		ATResponse *resp2 = NULL;
+		int i;
+		for (i=0; i<10; i++) {
+			err = at_send_command_numeric("AT+CIMI", &resp2);
+			if (err < 0 || !resp2->success)
+				err = -1;
+			at_response_free(resp2);
+			if (err >= 0)
+				break;
+			sleep(2);
+		}
+		if (i == 10) {
+			ret = SIM_NOT_READY;
+			goto done;
+		}
+	}
+
+	at_response_free(p_response);
+	p_response = NULL;
+	cpinResult = NULL;
+
 	//fall through if everything else succeeded
 	ret = SIM_READY;
 
@@ -5056,10 +5009,6 @@ static void pollSIMState (void *param)
 		// no longer valid to poll
 		return;
 	}
-	if(!isgsm) {
-		setRadioState(RADIO_STATE_SIM_READY);
-		return;
-	}
 
 	switch(getSIMStatus()) {
 		case SIM_ABSENT:
@@ -5115,7 +5064,8 @@ error:
 
 /**
  * Initialize everything that can be configured while we're still in
- * AT+CFUN=0
+ * AT+CFUN=0. Leave mode-specific stuff until after PowerOn, since
+ * the actual Android Phone type is only determined then.
  */
 static void initializeCallback(void *param)
 {
@@ -5124,25 +5074,25 @@ static void initializeCallback(void *param)
 
 	at_handshake();
 
+	if (phone_has & MODE_GSM) {
+		at_send_command("AT@HTCCSQ=0", &p_response);
+		/* World phones have GSM radios but don't support all GSM commands */
+		if (!p_response->success) {
+			phone_has |= MODE_CDMA;
+			LOGD("Running on a world phone\n");
+		}
+		at_response_free(p_response);
+	}
 	/* make sure the radio is off */
-	if(isgsm)
+	if(phone_has & MODE_GSM)
 		at_send_command("AT+CFUN=0", NULL);
 	else {
 		/* Sending 'AT+CFUN=0' to a CDMA diam/raph eventually causes a "FATAL_ERROR: SM_TM (oncrpc_cb.c:00596)"
 		 * Send 'CFUN=66' first, if that errors then we know this is a world phone */
-		at_send_command("AT+CFUN=66", &p_response);
-		if (p_response->success == 0)
-		{
-			is_world_cdma = 1;
-			LOGD("Running on a world phone in CDMA mode\n");
-			at_send_command("AT+CFUN=0", NULL);
-		}
-		at_response_free(p_response);
+		at_send_command("AT+CFUN=66", NULL);
 	}
 
-
 	setRadioState (RADIO_STATE_OFF);
-
 
 	strcpy(erisystem,"Android");
 
@@ -5194,92 +5144,15 @@ static void initializeCallback(void *param)
 	/*  don't hide outgoing callerID */
 	at_send_command("AT+CLIR=0", NULL);
 
-#if 0
+	/*  dunno, magic... */
 	at_send_command("AT+HTCmaskW1=4294967295,14449", NULL);
+
+#if 0
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
 	/* List all supported commands */
 	at_send_command("AT+CLAC", NULL);
 #endif
-
-	/*  bring up the device, also resets the stack. Don't do this! Handled elsewhere */
-//	at_send_command("AT+CFUN=1", NULL);
-
-	if(isgsm) {
-		/*  Call Waiting notifications */
-		at_send_command("AT+CCWA=1", NULL);
-
-		/*  No connected line identification */
-		at_send_command("AT+COLP=0", NULL);
-
-		/*  USSD unsolicited */
-		at_send_command("AT+CUSD=1", NULL);
-
-		/*  SMS PDU mode */
-		at_send_command("AT+CMGF=0", NULL);
-
-		at_send_command("AT+GTKC=2", NULL);
-
-		/*  +CSSU unsolicited supp service notifications */
-		at_send_command("AT+CSSN=0,1", NULL);
-
-		/*  HEX character set */
-		at_send_command("AT+CSCS=\"HEX\"", NULL);
-
-		/*  Extra stuff */
-		at_send_command("AT+FCLASS=0", NULL);
-
-               at_send_command("AT+CNMI=1,2,2,2,0", NULL);
-		at_send_command("AT+CPPP=1", NULL);
-
-
-		/*  Network registration events */
-		err = at_send_command("AT+CREG=2", &p_response);
-
-		/* some handsets -- in tethered mode -- don't support CREG=2 */
-		if (err < 0 || p_response->success == 0)
-			at_send_command("AT+CREG=1", NULL);
-
-		at_response_free(p_response);
-
-		/*  GPRS registration events */
-		at_send_command("AT+CGREG=2", NULL);
-
-               /* Disable RSSI Indicators for Now */
-               at_send_command("AT@HTCCSQ=0", NULL);
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
-		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
-		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
-		at_send_command("AT+HTCNV=1,12,8,5", NULL);
-		at_send_command("AT+HSDPA=2", NULL);
-		at_send_command("AT+HTCCNIV=0", NULL);
-//		at_send_command("AT@HTCDORMANCYSET=3", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
-		at_send_command("AT+HTCAGPS=2", NULL);
-//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
-		at_send_command("AT",NULL);
-		/* auto connect/disconnect settings */
-//		at_send_command("AT+BANDSET=0", NULL);
-//		at_send_command("AT+CGAATT=2,1,0", NULL);
-		at_send_command("AT+GTKC=2", NULL);
-		/* Unsolicited neighbor reports.
-		 * We're not leveraging them, so don't bother
-		 */
-//		at_send_command("AT+2GNCELL=1", NULL);
-//		at_send_command("AT+3GNCELL=1", NULL);
-
-	} else {
-		if (is_world_cdma)
-			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
-	}
-
-	/* assume radio is off on error */
-	if (isRadioOn() > 0) {
-		setRadioState (Radio_NOT_READY);
-	}
 }
 
 static void waitForClose()
@@ -5320,11 +5193,10 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			|| !strcmp(s, "3") /* NO CARRIER */
 			|| strStartsWith(s,"+CCWA")
 		  ) {
-		if (strStartsWith(s,"+CCWA") && !isgsm) {
+		if (strStartsWith(s,"+CCWA") && phone_is == MODE_CDMA) {
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
-			if (cdma_phone)
-				return;
+			return;
 		}
 		err = 0;
 		if (s[0] == '3') {
@@ -5360,7 +5232,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 /*		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); */
 	} else if (strStartsWith(s, "+CMT:")) {
 		LOGD("GSM_PDU=%s\n",sms_pdu);
-		if(cdma_phone) {
+		if(phone_is == MODE_CDMA) {
 			RIL_CDMA_SMS_Message msg;
 
 			memset(&msg, 0, sizeof(msg));
@@ -5368,15 +5240,6 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			RIL_onUnsolicitedResponse (
 					RIL_UNSOL_RESPONSE_CDMA_NEW_SMS,
 					&msg, sizeof(msg));
-		} else if(!isgsm) {
-			char **pdu;
-			pdu=cdma_to_gsmpdu(sms_pdu);
-			while(*pdu) {
-				//				dbg(3,"RIL","SMS GSM_PDU=%s\n",*pdu);
-				RIL_onUnsolicitedResponse (
-						RIL_UNSOL_RESPONSE_NEW_SMS,*pdu,strlen(*pdu));
-				pdu++;
-			}
 		} else
 			RIL_onUnsolicitedResponse (
 					RIL_UNSOL_RESPONSE_NEW_SMS,
@@ -5496,6 +5359,11 @@ mainLoop(void *param)
 #ifdef RIL_SHLIB
 
 pthread_t s_tid_mainloop;
+#if 0
+/* CDMA mode is now detected dynamically, North American Dialing
+ * is handled by the Android CDMA phone framework, and slow_sim
+ * is just going to be ignored for now
+ */
 void parse_cmdline() {
 	int fd=open("/proc/cmdline", O_RDONLY);
 	char buf[1024];
@@ -5527,6 +5395,7 @@ void parse_cmdline() {
 		cdma_north_american_dialing=atoi(ptr);
 	}
 }
+#endif
 
 const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **argv)
 {
@@ -5538,13 +5407,20 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 
 	s_rilenv = env;
 
-	fd=open("/sys/class/htc_hw/radio", O_RDONLY);
-	read(fd, buffer, 32);
-	isgsm=0;
-	if(strncmp(buffer, "GSM",3)==0)
-		isgsm=1;
-	close(fd);
+	/* The GSM-enabled phones all use /dev/smd7 for mobile data. The pure-CDMA
+	 * phones (DIAM and RAPH) use /dev/smd1. rhod400/rhod500 have smd7 but also
+	 * support CDMA.
+	 */
+	if (access("/dev/smd7", F_OK)) {
+		phone_has = MODE_GSM;
+		phone_is = MODE_GSM;
+	} else {
+		phone_has = MODE_CDMA;
+		phone_is = MODE_CDMA;
+	}
+#if 0
 	parse_cmdline();
+#endif
 
 	while ( -1 != (opt = getopt(argc, argv, "h:p:d:s:"))) {
 		switch (opt) {
