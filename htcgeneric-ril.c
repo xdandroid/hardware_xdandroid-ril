@@ -802,7 +802,7 @@ static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
 
 	/* AMSS version */
 	err = at_send_command_singleline("AT+RADIOVER", "+RADIOVER:", &p_response);
-	if (err != 0) goto error;
+	if (err != 0 || !p_response->success) goto error;
 
 	line = p_response->p_intermediates->line;
 
@@ -815,7 +815,7 @@ static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
 
 	/* Radio version */
 	err = at_send_command_singleline("AT@v", "", &p_response);
-	if (err != 0) goto error;
+	if (err != 0 || !p_response->success) goto error;
 
 	line = p_response->p_intermediates->line;
 	err = at_tok_nextstr(&line, &ptr);
@@ -897,7 +897,7 @@ static void requestQueryAvailableNetworks(void *data, size_t datalen, RIL_Token 
 
 	err = at_send_command_singleline("AT+COPS=?", "+COPS:", &p_response);
 
-	if (err != 0) goto error;
+	if (err != 0 || !p_response->success) goto error;
 
 	line = p_response->p_intermediates->line;
 
@@ -1740,7 +1740,7 @@ static void requestRegistrationState(int request, void *data,
 		cmd = "AT+HTC_GETSYSTYPE=0";
 		prefix= "+HTC_GETSYSTYPE:";
 		err = at_send_command_singleline(cmd, prefix, &p_response);
-		if(err==0) {
+		if(err==0 && p_response->success) {
 			line = p_response->p_intermediates->line;
 			err = at_tok_start(&line);
 			if(err==0)
@@ -1754,7 +1754,7 @@ static void requestRegistrationState(int request, void *data,
 	for (i=0;i<4 && err != 0;i++)
 		err = at_send_command_singleline(cmd, prefix, &p_response);
 
-	if (err != 0) goto error;
+	if (err != 0 || !p_response->success) goto error;
 
 	line = p_response->p_intermediates->line;
 
@@ -1942,6 +1942,8 @@ static void requestRegistrationState(int request, void *data,
 				at_send_command("AT+HTC_SRV_STATUS?", NULL);
 
 			err = at_send_command_singleline("AT+HTC_BSINFO?", "+HTC_BSINFO:", &p_response_bs);
+			if (err < 0 || !p_response->success)
+				goto error;
 			line_bs = p_response_bs->p_intermediates->line;
 			err = at_tok_start(&line_bs);
 			err = at_tok_nextstr(&line_bs, &responseStr[8]);
@@ -2011,7 +2013,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 		 * +COPS: 0,2,"310170"
 		 */
 
-		if (err != 0) goto error;
+		if (err != 0 || !p_response->success) goto error;
 
 		for (i = 0, p_cur = p_response->p_intermediates
 				; p_cur != NULL
@@ -2063,7 +2065,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 			char *line, *p;
 			err = at_send_command_singleline("AT+HTC_SRV_STATUS?", "+HTC_SRV_STATUS:",
 				&p_response);
-			if (err != 0) goto error;
+			if (err < 0 || !p_response->success) goto error;
 
 			line = p_response->p_intermediates->line;
 
@@ -3880,7 +3882,7 @@ static void requestCdmaSubscription(RIL_Token t) {
 	char *responseStr[5] = {mdn, h_sids, h_nids, min, prl};
 
 	err = at_send_command_singleline("AT+HTC_NAM_SEL?", "+HTC_NAM_SEL:", &p_response);
-	if (err != 0) goto error;
+	if (err != 0 || !p_response->success) goto error;
 
 	/* returns x,x,"MDN" */
 	line = p_response->p_intermediates->line;
@@ -4072,7 +4074,7 @@ static void requestCdmaGetVoicePriv(RIL_Token t) {
 	char *line;
 
 	err = at_send_command_singleline("AT+HTC_VPRIVACY=4", "+HTC_VPRIVACY:", &p_response);
-	if (err !=0) goto error;
+	if (err !=0 || !p_response->success) goto error;
 
 	/* returns x */
 	line = p_response->p_intermediates->line;
@@ -4128,7 +4130,7 @@ static void requestGetTTYMode(RIL_Token t) {
 	char *line;
 
 	err = at_send_command_singleline("AT+HTC_TTYMODE=4", "+HTC_TTYMODE:", &p_response);
-	if (err !=0) goto error;
+	if (err !=0 || !p_response->success) goto error;
 
 	/* returns x */
 	line = p_response->p_intermediates->line;
