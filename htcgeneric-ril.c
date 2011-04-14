@@ -175,9 +175,10 @@ static void setRadioState(RIL_RadioState newState);
 #define MODE_GSM	1
 #define MODE_CDMA	2
 
+static int phone_has = 0;	/* Modes that the phone hardware supports */
+static int phone_is  = 0;	/* Mode the phone is in */
 static int isgsm=0;
 static int is_world_cdma=0;	/* Will be set to 1 for world phones operating in CDMA mode (i.e. RhodiumW/RHOD400/RHOD500) */
-static int cdma_phone=0;	/* Set to 1 if Android is set to CDMA mode */
 static char erisystem[50];
 static char erishort[50];
 static char operid[12];
@@ -211,7 +212,7 @@ static void handle_cdma_ccwa (const char *s)
 	char *line, *tmp;
 
 	line = tmp = strdup(s);
-	if (cdma_phone)
+	if (phone_is == MODE_CDMA)
 	{
 		RIL_CDMA_CallWaiting resp;
 		err = at_tok_start(&tmp);
@@ -452,7 +453,7 @@ static void onRadioPowerOn()
 		at_send_command("AT+ODEN=911", NULL);
 //		at_send_command("AT+ALS=4294967295", NULL);
 	}
-	if (cdma_phone)
+	if (phone_is == MODE_CDMA)
 		setRadioState(Radio_READY);
 	else
 		pollSIMState(NULL);
@@ -520,7 +521,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 	onOff = ((int *)data)[0];
 
 	if (onOff == 0 && sState != RADIO_STATE_OFF) {
-		if(isgsm || is_world_cdma)
+		if(phone_has & MODE_GSM)
 			err = at_send_command("AT+CFUN=0", &p_response);
 		else
 			err = at_send_command("AT+CFUN=66", &p_response);
@@ -541,7 +542,15 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		}
 		property_get("gsm.current.phone-type", value, "1");
 		if (value[0] == '2') {
-			cdma_phone = 1;
+			phone_is = MODE_CDMA;
+		} else {
+			phone_is = MODE_GSM;
+		}
+		/* did we get a mode the phone doesn't support? */
+		if (!(phone_is & phone_has)) {
+			phone_is = phone_has;
+		}
+		if (phone_is == MODE_CDMA) {
 			Radio_READY = RADIO_STATE_NV_READY;
 			Radio_NOT_READY = RADIO_STATE_NV_NOT_READY;
 			LOGD("Using CDMA Phone");
@@ -1329,7 +1338,7 @@ static void resp2Strength(int *response, RIL_SignalStrength *rs)
 		rs->GW_SignalStrength.signalStrength = response[0];
 		rs->GW_SignalStrength.bitErrorRate = response[1];
 	} else {
-		if (cdma_phone) {
+		if (phone_is == MODE_CDMA) {
 			/* 1st # is CDMA, 2nd is EVDO */
 			rs->CDMA_SignalStrength.dbm = dbm_table[response[0]];
 			rs->CDMA_SignalStrength.ecio = ecio_table[response[0]];
@@ -2011,7 +2020,7 @@ static void requestOperator(void *data, size_t datalen, RIL_Token t)
 	else {
 		response[0]=erisystem;
 		response[1]=erishort;
-		if (cdma_phone) {
+		if (phone_is == MODE_CDMA) {
 			if (!operid[0]) {
 				char *line, *p;
 				err = at_send_command_singleline("AT+HTC_SRV_STATUS?", "+HTC_SRV_STATUS:",
@@ -2300,7 +2309,6 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	} else {
 		//CDMA
-		err = at_send_command("AT+CFUN=1", NULL);
 		pthread_mutex_lock(&s_data_mutex);
 		data_state = Data_Dialing;
 		pthread_mutex_unlock(&s_data_mutex);
@@ -5167,25 +5175,25 @@ static void initializeCallback(void *param)
 
 	at_handshake();
 
+	if (phone_has & MODE_GSM) {
+		at_send_command("AT@HTCCSQ=0", &p_response);
+		/* World phones have GSM radios but don't support all GSM commands */
+		if (!p_response->success) {
+			phone_has |= MODE_CDMA;
+			LOGD("Running on a world phone\n");
+		}
+		at_response_free(p_response);
+	}
 	/* make sure the radio is off */
-	if(isgsm)
+	if(phone_has & MODE_GSM)
 		at_send_command("AT+CFUN=0", NULL);
 	else {
 		/* Sending 'AT+CFUN=0' to a CDMA diam/raph eventually causes a "FATAL_ERROR: SM_TM (oncrpc_cb.c:00596)"
 		 * Send 'CFUN=66' first, if that errors then we know this is a world phone */
-		at_send_command("AT+CFUN=66", &p_response);
-		if (p_response->success == 0)
-		{
-			is_world_cdma = 1;
-			LOGD("Running on a world phone in CDMA mode\n");
-			at_send_command("AT+CFUN=0", NULL);
-		}
-		at_response_free(p_response);
+		at_send_command("AT+CFUN=66", NULL);
 	}
 
-
 	setRadioState (RADIO_STATE_OFF);
-
 
 	strcpy(erisystem,"Android");
 
@@ -5313,8 +5321,7 @@ static void initializeCallback(void *param)
 //		at_send_command("AT+3GNCELL=1", NULL);
 
 	} else {
-		if (is_world_cdma)
-			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
+		at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
 		at_send_command("AT+ENCSQ=1", NULL);
 		at_send_command("AT@HTCPDPFD=0", NULL);
 	}
@@ -5366,7 +5373,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		if (strStartsWith(s,"+CCWA") && !isgsm) {
 			/* Handle CCWA specially */
 			handle_cdma_ccwa(s);
-			if (cdma_phone)
+			if (phone_is == MODE_CDMA)
 				return;
 		}
 		err = 0;
@@ -5403,7 +5410,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 /*		RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL); */
 	} else if (strStartsWith(s, "+CMT:")) {
 		LOGD("GSM_PDU=%s\n",sms_pdu);
-		if(cdma_phone) {
+		if(phone_is == MODE_CDMA) {
 			RIL_CDMA_SMS_Message msg;
 
 			memset(&msg, 0, sizeof(msg));
@@ -5592,9 +5599,12 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	 * support CDMA.
 	 */
 	if (access("/dev/smd7", F_OK)) {
+		phone_has = MODE_GSM;
+		phone_is = MODE_GSM;
 		isgsm = 1;
 	} else {
-		cdma_phone = 1;
+		phone_has = MODE_CDMA;
+		phone_is = MODE_CDMA;
 	}
 #if 0
 	parse_cmdline();
