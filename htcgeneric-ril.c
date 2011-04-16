@@ -404,7 +404,6 @@ static int dataCallNum()
 	return callNumber;
 }
 
-
 /** do post-AT+CFUN=1 initialization */
 static void onRadioPowerOn()
 {
@@ -418,78 +417,15 @@ static void onRadioPowerOn()
 	/*  TI specific -- enable NITZ unsol notifs */
 	at_send_command("AT%CTZV=1", NULL);
 #endif
+
 	if(phone_is == MODE_GSM)
 	{
-		at_send_command("AT+FCLASS=0", NULL);
-
-		/*  SMS PDU mode */
-		at_send_command("AT+CMGF=0", NULL);
-
-		/*  HEX character set */
-		at_send_command("AT+CSCS=\"HEX\"", NULL);
-
-		/*  +CSSU unsolicited supp service notifications */
-		at_send_command("AT+CSSN=1,1", NULL);
-
-		/*  No connected line identification */
-		at_send_command("AT+COLP=0", NULL);
-
-		/*  Call Waiting notifications */
-		at_send_command("AT+CCWA=1", NULL);
-
-		at_send_command("AT+CNMI=1,2,2,2,0", NULL);
-
-		/*  GPRS registration events */
-		at_send_command("AT+CGREG=2", NULL);
-
-		/*  USSD unsolicited */
-		at_send_command("AT+CUSD=1", NULL);
-
-		at_send_command("AT+CPPP=2", NULL);
-
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
-
-		{
-			int err;
-			ATResponse *p_response;
-			/*  Network registration events */
-			err = at_send_command("AT+CREG=2", &p_response);
-			/* some handsets -- in tethered mode -- don't support CREG=2 */
-			if (err < 0 || p_response->success == 0)
-				at_send_command("AT+CREG=1", NULL);
-			at_response_free(p_response);
-		}
-
-//		at_send_command("AT+HTCmaskW1=262143,162161", NULL);
-//		at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
-
-		at_send_command("AT+CHZ=0", NULL);
-		at_send_command("AT+2GNCELL=0", NULL);
-		at_send_command("AT+3GNCELL=0", NULL);
-		at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
-
-		/* CNV=DTM, GPRSCLASS, HSDPA category [,HSUPA category] */
-		at_send_command("AT+HTCNV=1,12,8,5", NULL);
-
-		at_send_command("AT+HSDPA=2", NULL);
-		at_send_command("AT+HTCCTZR=1", NULL);
-		at_send_command("AT+HTCCNIV=0", NULL);
-		at_send_command("AT@HTCDORMANCYSET=3", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
-		at_send_command("AT+HTCAGPS=2", NULL);
-
-		/*enable ENS mode, okay to fail */
-//		at_send_command("AT+HTCENS=1", NULL);
-
 		if (!done_first) {
 			at_send_command("AT+BANDSET=0", NULL);
 			at_send_command("AT+CGAATT=2,2,0", NULL);
 		}
 
 //		at_send_command("AT+ALS=4294967295", NULL);
-
-		at_send_command("AT+GTKC=2", NULL);
 
 		at_send_command("AT+ODEN=112", NULL);
 		at_send_command("AT+ODEN=911", NULL);
@@ -502,10 +438,11 @@ static void onRadioPowerOn()
 		pollSIMState(NULL);
 	} else {
 		if (!done_first) {
+//			at_send_command("AT+PREV_CDMA=1", NULL);
 			at_send_command("AT+CGAATT=2,1,6", NULL);	/* '6'=CDMA-only mode, '3'=GSM-only, '0'=world mode */
 		}
-		at_send_command("AT+ENCSQ=1", NULL);
-		at_send_command("AT@HTCPDPFD=0", NULL);
+		at_send_command("AT+HTC_GPSONE=4", NULL);
+		at_send_command("AT+CLVL=102", NULL);
 
 		setRadioState(Radio_READY);
 	}
@@ -2660,7 +2597,7 @@ static void unsolicitedRSSI(const char * s)
 {
 	int err;
 	int response[2];
-	const unsigned char asu_table[5]={0,3,5,8,12};
+	const unsigned char asu_table[6]={0,3,5,8,12,19};
 	char * line = NULL, *origline;
 	RIL_SignalStrength rs = {{99,99},{-1,-1},{-1,-1,-1}};
 
@@ -2679,7 +2616,7 @@ static void unsolicitedRSSI(const char * s)
 	}
 	if (phone_is == MODE_GSM) {
 		if (s[0] == '@')
-			response[0]=asu_table[response[0]%5];
+			response[0]=asu_table[response[0]%6];
 	}
 
 	signalStrength[0]=response[0];
@@ -5134,21 +5071,83 @@ static void initializeCallback(void *param)
 	/*  detailed rings, service reporting */
 	at_send_command("AT+CRC=1;+CR=1", NULL);
 
-	/*  Alternating voice/data off */
-	at_send_command("AT+CMOD=0", NULL);
+	at_send_command("AT+FCLASS=0", NULL);
+
+	/*  SMS PDU mode */
+	at_send_command("AT+CMGF=0", NULL);
+
+	/*  HEX character set */
+	at_send_command("AT+CSCS=\"HEX\"", NULL);
+
+	/*  +CSSU unsolicited supp service notifications */
+	at_send_command("AT+CSSN=1,1", NULL);
+
+	/*  No connected line identification */
+	at_send_command("AT+COLP=0", NULL);
+
+	/*  Call Waiting notifications */
+	at_send_command("AT+CCWA=1", NULL);
 
 	/*  Not muted */
 	at_send_command("AT+CMUT=0", NULL);
 
-	/*  caller id = yes */
-	at_send_command("AT+CLIP=1", NULL);
-
 	/*  don't hide outgoing callerID */
 	at_send_command("AT+CLIR=0", NULL);
+
+	at_send_command("AT+CNMI=1,2,2,2,0", NULL);
+
+	/*  GPRS registration events */
+	at_send_command("AT+CGREG=1", NULL);
+
+	/*  USSD unsolicited */
+	at_send_command("AT+CUSD=1", NULL);
+
+	at_send_command("AT+CPPP=2", NULL);
+
+	at_send_command("AT+ENCSQ=1", NULL);
+	at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
+
+	/*  Network registration events */
+	err = at_send_command("AT+CREG=2", &p_response);
+	/* some handsets -- in tethered mode -- don't support CREG=2 */
+	if (err < 0 || p_response->success == 0)
+		at_send_command("AT+CREG=1", NULL);
+	at_response_free(p_response);
 
 	/*  dunno, magic... */
 	at_send_command("AT+HTCmaskW1=4294967295,14449", NULL);
 
+//	at_send_command("AT+HTCmaskW1=262143,162161", NULL);
+//	at_send_command("AT@AGPSADDRESS=193,253,42,109,7275", NULL);
+
+	at_send_command("AT+CHZ=0", NULL);
+	at_send_command("AT+2GNCELL=0", NULL);
+	at_send_command("AT+3GNCELL=0", NULL);
+	at_send_command("AT+CGEQREQ=1,4,0,0,0,0,2,0,\"0E0\",\"0E0\",3,0,0", NULL);
+
+	/* CNV=DTM, GPRSCLASS, HSDPA category [,HSUPA category] */
+	at_send_command("AT+HTCNV=1,12,8,6", NULL);
+
+	at_send_command("AT+HSDPA=2", NULL);
+	at_send_command("AT+HTCCTZR=1", NULL);
+	at_send_command("AT+HTCCNIV=0", NULL);
+	at_send_command("AT@HTCDORMANCYSET=3", NULL);
+	at_send_command("AT@HTCPDPFD=0", NULL);
+	at_send_command("AT+HTCAGPS=2", NULL);
+
+		/*enable ENS mode, okay to fail */
+//		at_send_command("AT+HTCENS=1", NULL);
+
+	/*  caller id = yes */
+	at_send_command("AT+CLIP=1", NULL);
+
+	/* Alternate Line Support? dual-sim etc.? */
+	at_send_command("AT+ALS=0", NULL);
+
+	/*  Alternating voice/data off */
+	at_send_command("AT+CMOD=0", NULL);
+
+	at_send_command("AT+GTKC=2", NULL);
 #if 0
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
