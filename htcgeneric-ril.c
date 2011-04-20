@@ -4287,7 +4287,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 				|| request == RIL_REQUEST_BASEBAND_VERSION
 				|| request == RIL_REQUEST_GET_IMEI
 				|| request == RIL_REQUEST_GET_IMEISV
-				|| request == RIL_REQUEST_DEVICE_IDENTITY)
+				|| request == RIL_REQUEST_DEVICE_IDENTITY
+				|| request == RIL_REQUEST_OEM_HOOK_STRINGS)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -4302,7 +4303,8 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 				|| request == RIL_REQUEST_BASEBAND_VERSION
 				|| request == RIL_REQUEST_GET_IMEI
 				|| request == RIL_REQUEST_GET_IMEISV
-				|| request == RIL_REQUEST_DEVICE_IDENTITY)
+				|| request == RIL_REQUEST_DEVICE_IDENTITY
+				|| request == RIL_REQUEST_OEM_HOOK_STRINGS)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -5423,7 +5425,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	parse_cmdline();
 #endif
 
-	while ( -1 != (opt = getopt(argc, argv, "h:p:d:s:"))) {
+	while ( -1 != (opt = getopt(argc, argv, "p:d:s:"))) {
 		switch (opt) {
 			case 'p':
 				s_port = atoi(optarg);
@@ -5435,7 +5437,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 				break;
 
 			case 'd':
-				s_device_path = "/dev/smd0";
+				s_device_path   = optarg;
 				LOGI("Opening tty device %s\n", s_device_path);
 				break;
 
@@ -5452,8 +5454,8 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	}
 
 	if (s_port < 0 && s_device_path == NULL) {
-		usage(argv[0]);
-		return NULL;
+		s_device_path = "/dev/smd0";
+		LOGI("Opening tty device %s\n", s_device_path);
 	}
 
 	pthread_attr_init (&attr);
@@ -5469,7 +5471,7 @@ int main (int argc, char **argv)
 	int fd = -1;
 	int opt;
 
-	while ( -1 != (opt = getopt(argc, argv, "p:d:"))) {
+	while ( -1 != (opt = getopt(argc, argv, "p:d:s:"))) {
 		switch (opt) {
 			case 'p':
 				s_port = atoi(optarg);
@@ -5480,7 +5482,7 @@ int main (int argc, char **argv)
 				break;
 
 			case 'd':
-				s_device_path = "/dev/smd0";
+				s_device_path = optarg;
 				LOGI("Opening tty device %s\n", s_device_path);
 				break;
 
