@@ -290,14 +290,21 @@ encode_cdma_subaddress(unsigned char *ptr, RIL_CDMA_SMS_Subaddress *addr) {
  */
 int encode_cdma_sms_from_ril(RIL_CDMA_SMS_Message *msg, unsigned char *buf, int len) {
 	unsigned char *ptr, *end;
+	int service = msg->uTeleserviceID;
 
 	end = buf+len;
 	ptr = putbyte(buf, 0);	/* msgtype = 00, point-to-point */
 
+	/* It seems like the wrong ID is getting set by Android.
+	 * Actual MMS messages are sent via HTTP, not thru here.
+	 */
+	if (service == 4101)	/* WEMT */
+		service = 4098;		/* WMT */
+
 	ptr = putbyte(ptr, 0);	/* Teleservice ID */
 	ptr = putbyte(ptr, 2);	/* 2 bytes */
-	ptr = putbyte(ptr, msg->uTeleserviceID >> 8);
-	ptr = putbyte(ptr, msg->uTeleserviceID);
+	ptr = putbyte(ptr, service >> 8);
+	ptr = putbyte(ptr, service);
 
 	if (msg->bIsServicePresent) {
 		ptr = putbyte(ptr, 1);	/* Service Category */
@@ -317,7 +324,7 @@ int encode_cdma_sms_from_ril(RIL_CDMA_SMS_Message *msg, unsigned char *buf, int 
 	}
 
 	ptr = putbyte(ptr, 6);	/* Bearer reply option */
-	ptr = putbyte(ptr, 1);
+	ptr = putbyte(ptr, 1);	/* 1 byte */
 	ptr = putbyte(ptr, (++msgid) & 0x3f);
 
 	if (msg->uBearerDataLen) {
