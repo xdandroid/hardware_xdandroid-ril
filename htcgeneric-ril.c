@@ -462,9 +462,6 @@ static void onRadioReady()
 		/* Preferred RAT - UMTS Dualmode */
 //		at_send_command("AT+XRAT=1,2", NULL);
 
-		//debug what type of sim is it?
-		at_send_command("AT+SIMTYPE", NULL);
-
 		/*
 		 * Always send SMS messages directly to the TE
 		 *
