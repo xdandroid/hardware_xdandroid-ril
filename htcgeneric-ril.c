@@ -178,6 +178,7 @@ static void setRadioState(RIL_RadioState newState);
 
 static int phone_has = 0;	/* Modes that the phone hardware supports */
 static int phone_is  = 0;	/* Mode the phone is in */
+static int world_phone = 0;
 static int done_first = 0;	/* Have we done poweron once before? */
 static int switch_req = 0;	/* When switching modes, ignore everything until this req */
 
@@ -193,6 +194,7 @@ static int gsm_rtype=-1;
 static int gsm_selmode=-1;
 static RADIO_Types android_rtype=RADIO_UNKNOWN;
 static char imei[16+4];
+static char esn[9];
 static int audio_on = 0;	/* is the audio on? */
 
 typedef enum {
@@ -516,7 +518,7 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 	onOff = ((int *)data)[0];
 
 	if (onOff == 0 && sState != RADIO_STATE_OFF) {
-		if(phone_has & MODE_GSM)
+		if((phone_has & MODE_GSM) || world_phone)
 			err = at_send_command("AT+CFUN=0", &p_response);
 		else
 			err = at_send_command("AT+CFUN=66", &p_response);
@@ -544,6 +546,9 @@ static void requestRadioPower(void *data, size_t datalen, RIL_Token t)
 		/* did we get a mode the phone doesn't support? */
 		if (!(phone_is & phone_has)) {
 			phone_is = phone_has;
+			if (phone_is == MODE_CDMA)
+				switch_req = RIL_REQUEST_CDMA_SUBSCRIPTION;
+			/* else what? Dunno what GSM should use */
 		}
 		setPhoneMode();
 	}
@@ -3519,6 +3524,7 @@ static void requestDeviceIdentity(RIL_Token t)
 {
 	int err;
 	char *resp[4], *blank="";
+	char meid[15];
 
 	if (phone_is == MODE_GSM) {
 		err = getIMEISV();
@@ -3529,7 +3535,7 @@ static void requestDeviceIdentity(RIL_Token t)
 		resp[2] = blank;
 		resp[3] = blank;
 	} else {
-		err = getESNMEID(0);
+		err = getESNMEID(1);
 		if (err < 0)
 			goto error;
 		resp[0] = blank;
@@ -3538,9 +3544,15 @@ static void requestDeviceIdentity(RIL_Token t)
 			resp[2] = imei;
 			resp[3] = blank;
 		} else {
-			resp[2] = blank;
-			resp[3] = imei;
-			imei[14] = '\0';
+			resp[0] = imei;
+			resp[1] = imei+16;
+			if (esn[0])
+				resp[2] = esn;
+			else
+				resp[2] = blank;
+		    strncpy(meid, imei, 14);
+			meid[14] = '\0';
+			resp[3] = meid;
 		}
 	}
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, resp, sizeof(resp));
@@ -3873,6 +3885,8 @@ static void requestCdmaSubscription(RIL_Token t) {
 	if (err < 0) goto error;
 	err = at_tok_nextstr(&line, &p);	/* esn, we might want to keep this? */
 	if (err < 0) goto error;
+	strncpy(esn, p, sizeof(esn));
+	esn[sizeof(esn)-1] = '\0';
 
 	err = at_tok_nextstr(&line, &p);
 	if (err < 0) goto error;
@@ -4272,16 +4286,19 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 
 	LOGD("onRequest: %s (%d)", requestToString(request), request);
 
+	/* These requests are always valid */
+	if (request == RIL_REQUEST_BASEBAND_VERSION ||
+		request == RIL_REQUEST_OEM_HOOK_STRINGS)
+		goto ok;
+
 	/* Ignore all requests except RIL_REQUEST_GET_SIM_STATUS
 	 * when RADIO_STATE_UNAVAILABLE.
 	 */
 	if (sState == RADIO_STATE_UNAVAILABLE
 			&& !(request == RIL_REQUEST_GET_SIM_STATUS
-				|| request == RIL_REQUEST_BASEBAND_VERSION
 				|| request == RIL_REQUEST_GET_IMEI
 				|| request == RIL_REQUEST_GET_IMEISV
-				|| request == RIL_REQUEST_DEVICE_IDENTITY
-				|| request == RIL_REQUEST_OEM_HOOK_STRINGS)
+				|| request == RIL_REQUEST_DEVICE_IDENTITY)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -4293,11 +4310,9 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	if (sState == RADIO_STATE_OFF
 			&& !(request == RIL_REQUEST_RADIO_POWER
 				|| request == RIL_REQUEST_GET_SIM_STATUS
-				|| request == RIL_REQUEST_BASEBAND_VERSION
 				|| request == RIL_REQUEST_GET_IMEI
 				|| request == RIL_REQUEST_GET_IMEISV
-				|| request == RIL_REQUEST_DEVICE_IDENTITY
-				|| request == RIL_REQUEST_OEM_HOOK_STRINGS)
+				|| request == RIL_REQUEST_DEVICE_IDENTITY)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
@@ -4312,6 +4327,7 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 		switch_req = 0;
 	}
 
+ok:
 	switch (request) {
 		case RIL_REQUEST_GET_SIM_STATUS: {
 			RIL_CardStatus *p_card_status;
@@ -5022,6 +5038,7 @@ static void initializeCallback(void *param)
 		/* World phones have GSM radios but don't support all GSM commands */
 		if (!p_response->success) {
 			phone_has |= MODE_CDMA;
+			world_phone = 1;
 			LOGD("Running on a world phone\n");
 		}
 		at_response_free(p_response);
