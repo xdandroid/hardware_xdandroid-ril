@@ -179,6 +179,7 @@ static void setRadioState(RIL_RadioState newState);
 static int phone_has = 0;	/* Modes that the phone hardware supports */
 static int phone_is  = 0;	/* Mode the phone is in */
 static int done_first = 0;	/* Have we done poweron once before? */
+static int switch_req = 0;	/* When switching modes, ignore everything until this req */
 
 static char erisystem[50];
 static char erishort[50];
@@ -1697,6 +1698,7 @@ static void requestRegistrationState(int request, void *data,
 			(phone_has & MODE_CDMA)) {
 			phone_is = MODE_CDMA;
 			setPhoneMode();
+			switch_req = RIL_REQUEST_CDMA_SUBSCRIPTION;
 		}
 		goto error;
 	}
@@ -3500,10 +3502,10 @@ static void requestGetIMEISV(int request, RIL_Token t)
 	int err;
 	char *resp;
 
-	if(phone_is == MODE_GSM)
-		err = getIMEISV();
-	else
+	if(phone_has & MODE_CDMA)
 		err = getESNMEID(1);
+	else
+		err = getIMEISV();
 
 	if (err < 0) {
 		RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
@@ -4302,6 +4304,15 @@ onRequest (int request, void *data, size_t datalen, RIL_Token t)
 	   ) {
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 		return;
+	}
+
+	/* In an Auto mode transition, ignore all commands until Android catches up */
+	if (switch_req) {
+		if (switch_req != request) {
+			RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
+			return;
+		}
+		switch_req = 0;
 	}
 
 	switch (request) {
