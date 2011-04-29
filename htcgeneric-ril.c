@@ -1691,7 +1691,15 @@ static void requestRegistrationState(int request, void *data,
 	for (i=0;i<4 && err != 0;i++)
 		err = at_send_command_singleline(cmd, prefix, &p_response);
 
-	if (err != 0 || !p_response->success) goto error;
+	if (err != 0 || !p_response->success) {
+		/* CGREG will return CREG if we're not in GSM */
+		if (err != 0 && request == RIL_REQUEST_GPRS_REGISTRATION_STATE &&
+			(phone_has & MODE_CDMA)) {
+			phone_is = MODE_CDMA;
+			setPhoneMode();
+		}
+		goto error;
+	}
 
 	line = p_response->p_intermediates->line;
 
