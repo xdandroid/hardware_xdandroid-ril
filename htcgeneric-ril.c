@@ -5136,6 +5136,26 @@ static void initializeCallback(void *param)
 	at_send_command("AT+CMOD=0", NULL);
 
 	at_send_command("AT+GTKC=2", NULL);
+
+	/* For worldphone, check for SIM card. If absent, just use CDMA. */
+	if (phone_has == (MODE_GSM|MODE_CDMA)) {
+		err = at_send_command_singleline("AT+SIMTYPE", "+SIMTYPE:", &p_response);
+		if (err == 0 && p_response->success) {
+			char *line = p_response->p_intermediates->line;
+			int simtype;
+			err = at_tok_start(&line);
+			if (err < 0) goto no_gsm;
+			err = at_tok_nextint(&line, &simtype);
+			if (err < 0) goto no_gsm;
+			if (!simtype) goto no_gsm;
+			property_set("ro.ril.world_phone", "true");
+		} else {
+no_gsm:
+			phone_has ^= MODE_GSM;
+			LOGD("World phone has no SIM card installed, just using CDMA\n");
+		}
+	}
+
 #if 0
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
