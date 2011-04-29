@@ -3585,30 +3585,16 @@ static void requestOEMHookStrings(void * data, size_t datalen, RIL_Token t)
 	ATResponse *p_response = NULL;
 
 	if(datalen==sizeof (char *)) {
-		send=(char *)*cur++;
-		startswith=(char *)*cur;
+		send=(char *)*cur;
+		startswith=send+2;
 		err = at_send_command_singleline(send, startswith, &p_response);
 		if(err<0 || p_response->success == 0)
                         RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 		else
-			RIL_onRequestComplete(t, RIL_E_SUCCESS, p_response->p_intermediates->line, sizeof (char *));
+			RIL_onRequestComplete(t, RIL_E_SUCCESS, &p_response->p_intermediates->line, sizeof (char **));
 		at_response_free(p_response);
 		return;
 	}
-/*
-	if(isgsm) {
-		LOGD("got OEM_HOOK_STRINGS: 0x%8p %lu", data, (long)datalen);
-
-		for (i = (datalen / sizeof (char *)), cur = (const char **)data; i > 0; cur++, i --){
-			LOGD("> '%s'", *cur);
-		}
-
-		// echo back strings
-		RIL_onRequestComplete(t, RIL_E_SUCCESS, data, datalen);
-	} else {
-		RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
-	}
-*/
 	RIL_onRequestComplete(t, RIL_E_REQUEST_NOT_SUPPORTED, NULL, 0);
 	return;
 }
