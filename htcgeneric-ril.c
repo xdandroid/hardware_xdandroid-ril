@@ -141,6 +141,7 @@ static int slow_sim=0;
 static int s_port = -1;
 static const char * s_device_path = NULL;
 static int          s_device_socket = 0;
+static const char *smd7 = "";
 
 /* trigger change to this with s_state_cond */
 static int s_closed = 0;
@@ -2295,7 +2296,7 @@ static void requestSetupDataCall(char **data, size_t datalen, RIL_Token t)
 		at_response_free(p_response);
 	}
 
-	asprintf(&userpass, PPP_SERVICE ":user %s password %s", user, pass);
+	asprintf(&userpass, PPP_SERVICE ":%s user %s password %s", smd7, user, pass);
 	property_set("net.gprs.local-ip", "0.0.0.0");
 	property_set("ctl.start", userpass);
 	free(userpass);
@@ -5456,6 +5457,7 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 	if (access("/dev/smd7", F_OK) == 0) {
 		phone_has = MODE_GSM;
 		phone_is = MODE_GSM;
+		smd7 = "/dev/smd7";
 	} else {
 		phone_has = MODE_CDMA;
 		phone_is = MODE_CDMA;
