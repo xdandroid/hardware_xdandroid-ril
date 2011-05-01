@@ -86,6 +86,7 @@ static const char *s_responsePrefix = NULL;
 static const char *s_smsPDU = NULL;
 static ATResponse *sp_response = NULL;
 static char *s_last_errmsg = NULL;
+static AT_CME_Error s_last_cme_error = CME_NO_ERROR;
 
 static void (*s_onTimeout)(void) = NULL;
 static void (*s_onReaderClosed)(void) = NULL;
@@ -148,10 +149,10 @@ static void addIntermediate(const char *line)
  * WARNING: NO CARRIER and others are sometimes unsolicited
  */
 static const char * s_finalResponsesError[] = {
-    "3",			/* NO CARRIER * sometimes! */
-    "4",			/* ERROR */
-    "6",			/* NO DIALTONE */
-    "8",			/* NO ANSWER */
+    "3",            /* NO CARRIER * sometimes! */
+    "4",            /* ERROR */
+    "6",            /* NO DIALTONE */
+    "8",            /* NO ANSWER */
     "+CMS ERROR:",
     "+CME ERROR:",
 };
@@ -160,10 +161,13 @@ static int isFinalResponseError(const char *line)
     size_t i;
 
     for (i = 0 ; i < NUM_ELEMS(s_finalResponsesError) ; i++) {
-		if ((line[0] == '+' && s_finalResponsesError[i][1] &&
-			strStartsWith(line, s_finalResponsesError[i])) ||
-			(line[1] == '\0' && line[0] == s_finalResponsesError[i][0]))
-		{
+        if ((line[0] == '+' && s_finalResponsesError[i][1] &&
+            strStartsWith(line, s_finalResponsesError[i])) ||
+            (line[1] == '\0' && line[0] == s_finalResponsesError[i][0]))
+        {
+            if (i == 5) {    /* CME ERROR */
+                s_last_cme_error = atoi(line+sizeof("+CME ERROR:"));
+            }
             return 1;
         }
     }
@@ -177,8 +181,8 @@ static int isFinalResponseError(const char *line)
  * WARNING: NO CARRIER and others are sometimes unsolicited
  */
 static const char * s_finalResponsesSuccess[] = {
-    "0",			/* OK */
-    "1",			/* CONNECT * some stacks start up data on another channel */
+    "0",            /* OK */
+    "1",            /* CONNECT * some stacks start up data on another channel */
 };
 static int isFinalResponseSuccess(const char *line)
 {
@@ -237,6 +241,8 @@ static void handleFinalResponse(const char *line)
 
 static void handleUnsolicited(const char *line)
 {
+    if (strStartsWith(line, "+CME ERROR:"))
+        s_last_cme_error = atoi(line+sizeof("+CME ERROR:"));
     if (s_unsolHandler != NULL) {
         s_unsolHandler(line, NULL);
     }
@@ -511,7 +517,7 @@ static int writeline (const char *s)
 
     w = malloc(len+1);
     if (!w)
-	return AT_ERROR_GENERIC;
+        return AT_ERROR_GENERIC;
     strcpy(w, s);
     w[len] = '\r';
     len++;
@@ -524,7 +530,7 @@ static int writeline (const char *s)
 
         if (written < 0) {
             ret = AT_ERROR_GENERIC;
-	    break;
+            break;
         }
 
         cur += written;
@@ -551,7 +557,7 @@ static int writeCtrlZ (const char *s)
 
     w = malloc(len+1);
     if (!w)
-	return AT_ERROR_GENERIC;
+        return AT_ERROR_GENERIC;
     strcpy(w, s);
     w[len] = '\032';
     len++;
@@ -564,7 +570,7 @@ static int writeCtrlZ (const char *s)
 
         if (written < 0) {
             ret = AT_ERROR_GENERIC;
-	    break;
+            break;
         }
 
         cur += written;
@@ -610,18 +616,18 @@ int at_open(int fd, ATUnsolHandler h)
     ret = ioctl(fd, OMAP_CSMI_TTY_ENABLE_ACK);
     if(ret == 0) {
         int ack_count;
-		int read_count;
+        int read_count;
         int old_flags;
         char sync_buf[256];
         old_flags = fcntl(fd, F_GETFL, 0);
         fcntl(fd, F_SETFL, old_flags | O_NONBLOCK);
         do {
             ioctl(fd, OMAP_CSMI_TTY_READ_UNACKED, &ack_count);
-			read_count = 0;
+            read_count = 0;
             do {
                 ret = read(fd, sync_buf, sizeof(sync_buf));
-				if(ret > 0)
-					read_count += ret;
+                if(ret > 0)
+                    read_count += ret;
             } while(ret > 0 || (ret < 0 && errno == EINTR));
             ioctl(fd, OMAP_CSMI_TTY_ACK, &ack_count);
          } while(ack_count > 0 || read_count > 0);
@@ -738,6 +744,9 @@ static int at_send_command_full_nolock (const char *command, ATCommandType type,
         goto error;
     }
 
+    if (!strncmp(command, "ATD", 3))
+        s_last_cme_error = CME_NO_ERROR;
+
     err = writeline (command);
 
     if (err < 0) {
@@ -791,25 +800,25 @@ static int at_send_command_full_nolock (const char *command, ATCommandType type,
 error:
     clearPendingCommand();
 
-	/* Have to save the error message right away */
-	if (pp_outResponse && !(*pp_outResponse)->success && !err && !strncmp(command, "ATD", 3)) {
-		ATResponse *err_resp;
-		err = at_send_command_full_nolock("AT+CEER", SINGLELINE, "+CEER:", NULL,
-			timeoutMsec, &err_resp);
-		if (!err) {
-			free(s_last_errmsg);
-			s_last_errmsg = strdup(err_resp->p_intermediates->line);
-			at_response_free(err_resp);
-		}
-	}
+    /* Have to save the error message right away */
+    if (pp_outResponse && !(*pp_outResponse)->success && !err && !strncmp(command, "ATD", 3)) {
+        ATResponse *err_resp;
+        err = at_send_command_full_nolock("AT+CEER", SINGLELINE, "+CEER:", NULL,
+            timeoutMsec, &err_resp);
+        if (!err) {
+            free(s_last_errmsg);
+            s_last_errmsg = strdup(err_resp->p_intermediates->line);
+            at_response_free(err_resp);
+        }
+    }
     return err;
 }
 
 char *at_get_last_error()
 {
-	char *res = s_last_errmsg;
-	s_last_errmsg = NULL;
-	return res;
+    char *res = s_last_errmsg;
+    s_last_errmsg = NULL;
+    return res;
 }
 
 /**
@@ -1016,38 +1025,10 @@ int at_handshake()
 }
 
 /**
- * Returns error code from response
- * Assumes AT+CMEE=1 (numeric) mode
+ * Returns last CME error code
  */
-AT_CME_Error at_get_cme_error(const ATResponse *p_response)
+AT_CME_Error at_get_cme_error()
 {
-    int ret;
-    int err;
-    char *p_cur;
-
-    if (p_response->success > 0) {
-        return CME_SUCCESS;
-    }
-
-    if (p_response->finalResponse == NULL
-        || !strStartsWith(p_response->finalResponse, "+CME ERROR:")
-    ) {
-        return CME_ERROR_NON_CME;
-    }
-
-    p_cur = p_response->finalResponse;
-    err = at_tok_start(&p_cur);
-
-    if (err < 0) {
-        return CME_ERROR_NON_CME;
-    }
-
-    err = at_tok_nextint(&p_cur, &ret);
-
-    if (err < 0) {
-        return CME_ERROR_NON_CME;
-    }
-
-    return (AT_CME_Error) ret;
+    return s_last_cme_error;
 }
 

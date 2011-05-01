@@ -3279,31 +3279,80 @@ static void requestSTKSetProfile(void * data, size_t datalen, RIL_Token t)
 	return;
 }
 
+static void requestLastDataFailCause(RIL_Token t)
+{
+	AT_CME_Error err = at_get_cme_error();
+	int response;
+
+	switch(err) {
+	case CME_PHONE_LINK_RESERVED:
+		response = PDP_FAIL_NSAPI_IN_USE; break;
+	case CME_SERVICE_OPTION_NOT_SUPPORTED:
+	case CME_OPERATION_NOT_SUPPORTED:
+		response = PDP_FAIL_SERVICE_OPTION_NOT_SUPPORTED; break;
+	case CME_SERVICE_OPTION_NOT_SUBSCRIBED:
+		response = PDP_FAIL_SERVICE_OPTION_NOT_SUBSCRIBED; break;
+	case CME_SERVICE_OPTION_OUT_OF_ORDER:
+		response = PDP_FAIL_SERVICE_OPTION_OUT_OF_ORDER; break;
+	case CME_OPERATION_NOT_ALLOWED:
+	case CME_NETWORK_NOT_ALLOWED:
+		response = PDP_FAIL_OPERATOR_BARRED; break;
+	case CME_PDP_AUTHENTICATION_FAILED:
+		response = PDP_FAIL_USER_AUTHENTICATION; break;
+	case CME_ILLEGAL_MS:
+	case CME_ILLEGAL_ME:
+	case CME_GPRS_NOT_ALLOWED:
+		response = PDP_FAIL_OPERATOR_BARRED; break;
+	case CME_PLMN_NOT_ALLOWED:
+	case CME_LOCATION_NOT_ALLOWED:
+	case CME_ROAMING_NOT_ALLOWED:
+		response = PDP_FAIL_ACTIVATION_REJECT_GGSN; break;
+	case CME_TEMPORARY_NOT_ALLOWED:
+		response = PDP_FAIL_ACTIVATION_REJECT_UNSPECIFIED; break;
+	case CME_PHONE_FAILURE:
+	case CME_PHONE_NO_CONNECTION:
+	case CME_NO_NETWORK_SERVICE:
+	case CME_NETWORK_TIMEOUT:
+		response = PDP_FAIL_REGISTRATION_FAIL; break;
+	case CME_MEMORY_FAILURE:
+		response = PDP_FAIL_INSUFFICIENT_RESOURCES; break;
+	case CME_INVALID_MOBILE_CLASS:
+		response = PDP_FAIL_GPRS_REGISTRATION_FAIL; break;
+	default:
+		response = PDP_FAIL_ERROR_UNSPECIFIED; break;
+	}
+	RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
+}
+
 static void requestLastFailCause(RIL_Token t)
 {
-	int err = 0;
-	int response = 0;
-	char *tmp = NULL;
-	char *line, *origline;
+	AT_CME_Error err = at_get_cme_error();
+	int response;
 
-	line = origline = at_get_last_error();
+	switch(err) {
+	case CME_PHONE_BUSY:
+		response = CALL_FAIL_BUSY; break;
+	case CME_NETWORK_TIMEOUT:
+		response = CALL_FAIL_CONGESTION; break;
+	case CME_OPERATION_NOT_ALLOWED:
+	case CME_OPERATION_NOT_SUPPORTED:
+	case CME_CALL_BARRED:
+		response = CALL_FAIL_CALL_BARRED; break;
+	case CME_PLMN_NOT_ALLOWED:
+	case CME_LOCATION_NOT_ALLOWED:
+	case CME_ROAMING_NOT_ALLOWED:
+		response = CALL_FAIL_FDN_BLOCKED; break;
+	case CME_NETWORK_NOT_ALLOWED:
+		response = CALL_FAIL_CDMA_NOT_EMERGENCY; break;
+	case CME_ILLEGAL_MS:
+		response = CALL_FAIL_IMSI_UNKNOWN_IN_VLR; break;
+	case CME_ILLEGAL_ME:
+		response = CALL_FAIL_IMEI_NOT_ACCEPTED; break;
+	default:
+		response = CALL_FAIL_ERROR_UNSPECIFIED; break;
+	}
 
-	err = at_tok_start(&line);
-	if(err < 0) goto error;
-
-	err = at_tok_nextstr(&line, &tmp);
-	if(err < 0) goto error;
-
-	err = at_tok_nextint(&line, &response);
-	if(err < 0) goto error;
-
-	free(origline);
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, &response, sizeof(int));
-	return;
-
-error:
-	free(origline);
-	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
 static void requestHangupWaitingOrBackground(RIL_Token t)
@@ -4607,6 +4656,9 @@ ok:
 			break;
 
 		case RIL_REQUEST_LAST_DATA_CALL_FAIL_CAUSE:
+			requestLastDataFailCause(t);
+			break;
+
 		case RIL_REQUEST_LAST_CALL_FAIL_CAUSE:
 			requestLastFailCause(t);
 			break;
@@ -4804,10 +4856,8 @@ getSIMStatus()
 		goto done;
 	}
 
-	switch (at_get_cme_error(p_response)) {
-		case CME_SUCCESS:
-			break;
-
+	if (!p_response->success) {
+	    switch (at_get_cme_error()) {
 		case CME_SIM_NOT_INSERTED:
 			ret = SIM_ABSENT;
 			goto done;
@@ -4815,6 +4865,7 @@ getSIMStatus()
 		default:
 			ret = SIM_NOT_READY;
 			goto done;
+	    }
 	}
 
 	/* CPIN? has succeeded, now look at the result */
