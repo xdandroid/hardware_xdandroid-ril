@@ -152,6 +152,7 @@ static const char * s_finalResponsesError[] = {
     "3",            /* NO CARRIER * sometimes! */
     "4",            /* ERROR */
     "6",            /* NO DIALTONE */
+    "7",            /* BUSY */
     "8",            /* NO ANSWER */
     "+CMS ERROR:",
     "+CME ERROR:",
@@ -165,7 +166,10 @@ static int isFinalResponseError(const char *line)
             strStartsWith(line, s_finalResponsesError[i])) ||
             (line[1] == '\0' && line[0] == s_finalResponsesError[i][0]))
         {
-            if (i == 5) {    /* CME ERROR */
+            if (i == 3) {    /* BUSY */
+                s_last_cme_error = CME_PHONE_BUSY;
+            } else
+            if (i == 6) {    /* CME ERROR */
                 s_last_cme_error = atoi(line+sizeof("+CME ERROR:"));
             }
             return 1;
