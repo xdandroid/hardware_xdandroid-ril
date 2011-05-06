@@ -196,6 +196,9 @@ static int gsm_selmode=-1;
 static RADIO_Types android_rtype=RADIO_UNKNOWN;
 static char imei[16+4];
 static char esn[9];
+static char prl[8];
+static char min[12];
+static char operID[12];
 static int audio_on = 0;	/* is the audio on? */
 
 typedef enum {
@@ -1910,8 +1913,8 @@ static void requestRegistrationState(int request, void *data,
 			if (err < 0) goto error;
 			if (responseStr[6][0] == '+')
 				responseStr[6]++;
-			responseStr[7] = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
-			responseStr[10] = "128";/* FIXME: Roaming Indicator */
+			responseStr[7]  = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
+			responseStr[10] = "64";	/* FIXME: Roaming Indicator */
 			responseStr[11] = "1";	/* FIXME: current system in PRL? */
 			responseStr[12] = eriPRL;	/* Default roaming indicator */
 			responseStr[13] = "-1";
@@ -3862,6 +3865,54 @@ static void requestCdmaSetSubscription(void *data, size_t datalen, RIL_Token t) 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, 0, 0);
 }
 
+static int getCDMAOperator() {
+	int err, skip;
+	ATResponse *p_response = NULL;
+	char *line, *p;
+
+	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
+	if (err < 0 || p_response->success == 0)
+		goto error;
+
+	/* returns version,mobile-sw version,esn,prl_version,pre_only,IMSI,customer_id,pri_version */
+	line = p_response->p_intermediates->line;
+
+	err = at_tok_start(&line);
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	err = at_tok_nextstr(&line, &p);	/* esn, we might want to keep this? */
+	if (err < 0) goto error;
+	strncpy(esn, p, sizeof(esn));
+	esn[sizeof(esn)-1] = '\0';
+
+	err = at_tok_nextstr(&line, &p);
+	if (err < 0) goto error;
+	strncpy(prl, p, sizeof(prl));
+	prl[sizeof(prl)-1] = '\0';
+
+	err = at_tok_nextstr(&line, &p);	/* pre_only */
+	if (err < 0) goto error;
+
+	err = at_tok_nextstr(&line, &p);	/* IMSI: operator ID + MIN */
+	if (err < 0) goto error;
+	skip = strlen(p);
+	if (skip < 10) {
+		err = -1;
+		goto error;
+	}
+	strcpy(min, p + skip - 10);
+	strncpy(operID, p, skip - 10);
+	operID[skip-10] = '\0';
+
+error:
+	at_response_free(p_response);
+	return err;
+}
+
 static void requestCdmaSubscription(RIL_Token t) {
 	int err, skip;
 	ATResponse *p_response = NULL;
@@ -3869,8 +3920,6 @@ static void requestCdmaSubscription(RIL_Token t) {
 	char mdn[12];
 	char h_sids[64];
 	char h_nids[64];
-	char min[12];
-	char prl[8];
 	char *responseStr[5] = {mdn, h_sids, h_nids, min, prl};
 
 	err = at_send_command_singleline("AT+HTC_NAM_SEL?", "+HTC_NAM_SEL:", &p_response);
@@ -3918,42 +3967,10 @@ static void requestCdmaSubscription(RIL_Token t) {
 	sprintf(h_nids, "%d", skip);
 
 	at_response_free(p_response);
+	p_response = NULL;
 
-	err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
-	if (err < 0 || p_response->success == 0)
-		goto error;
-
-	/* returns version,mobile-sw version,esn,prl_version,pre_only,IMSI,customer_id,pri_version */
-	line = p_response->p_intermediates->line;
-
-	err = at_tok_start(&line);
-	if (err < 0) goto error;
-
-	err = at_tok_nextstr(&line, &p);
-	if (err < 0) goto error;
-	err = at_tok_nextstr(&line, &p);
-	if (err < 0) goto error;
-	err = at_tok_nextstr(&line, &p);	/* esn, we might want to keep this? */
-	if (err < 0) goto error;
-	strncpy(esn, p, sizeof(esn));
-	esn[sizeof(esn)-1] = '\0';
-
-	err = at_tok_nextstr(&line, &p);
-	if (err < 0) goto error;
-	strncpy(prl, p, sizeof(prl));
-	prl[sizeof(prl)-1] = '\0';
-
-	err = at_tok_nextstr(&line, &p);	/* pre_only */
-	if (err < 0) goto error;
-
-	err = at_tok_nextstr(&line, &p);	/* IMSI: operator ID + MIN */
-	if (err < 0) goto error;
-	skip = strlen(p);
-	if (skip < 10)
-		goto error;
-	strcpy(min, p + skip - 10);
-
-	at_response_free(p_response);
+	err = getCDMAOperator();
+	if (err) goto error;
 
 	RIL_onRequestComplete(t, RIL_E_SUCCESS, responseStr, sizeof(responseStr));
 	return;
@@ -5241,6 +5258,13 @@ no_gsm:
 		}
 	}
 
+	/* For CDMA, find operator ID */
+	if (phone_has & MODE_CDMA) {
+		err = getCDMAOperator();
+		if (!err) {
+			property_set("ro.cdma.home.operator.numeric", operID);
+		}
+	}
 #if 0
 	/* Show battery strength */
 	at_send_command("AT+CBC", NULL);
