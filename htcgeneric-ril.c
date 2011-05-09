@@ -5195,6 +5195,8 @@ static void initializeCallback(void *param)
 	at_send_command("AT+CPPP=2", NULL);
 
 	at_send_command("AT+ENCSQ=1", NULL);
+
+	/* Disconnect notifications; ?? */
 	at_send_command("AT@HTCDIS=1;@HTCSAP=1", NULL);
 
 	/*  Network registration events */
@@ -5394,6 +5396,7 @@ static void onATReaderClosed()
 	setRadioState (RADIO_STATE_UNAVAILABLE);
 }
 
+#if 0
 /* Called on command thread */
 static void onATTimeout()
 {
@@ -5406,6 +5409,7 @@ static void onATTimeout()
 
 	setRadioState (RADIO_STATE_UNAVAILABLE);
 }
+#endif
 
 static void usage(char *s)
 {
@@ -5425,7 +5429,10 @@ mainLoop(void *param)
 
 	AT_DUMP("== ", "entering mainLoop()", -1 );
 	at_set_on_reader_closed(onATReaderClosed);
+#if 0
+	/* /dev/smd0 doesn't survive a close, can't be re-opened */
 	at_set_on_timeout(onATTimeout);
+#endif
 
 	for (;;) {
 		fd = -1;

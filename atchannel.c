@@ -895,7 +895,7 @@ int at_send_command_singleline (const char *command,
     int err;
 
     err = at_send_command_full (command, SINGLELINE, responsePrefix,
-                                    NULL, 0, pp_outResponse);
+                                    NULL, 5000, pp_outResponse);
 
     if (err == 0 && pp_outResponse != NULL
         && (*pp_outResponse)->success > 0
@@ -964,7 +964,7 @@ int at_send_command_multiline (const char *command,
     int err;
 
     err = at_send_command_full (command, MULTILINE, responsePrefix,
-                                    NULL, 0, pp_outResponse);
+                                    NULL, 5000, pp_outResponse);
 
     return err;
 }
