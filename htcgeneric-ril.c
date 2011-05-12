@@ -1936,6 +1936,7 @@ static void requestRegistrationState(int request, void *data,
 error:
 	LOGE("requestRegistrationState must never return an error when radio is on");
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+	at_response_free(p_response_bs);
 	at_response_free(p_response);
 }
 
