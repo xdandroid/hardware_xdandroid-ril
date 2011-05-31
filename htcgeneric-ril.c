@@ -478,7 +478,7 @@ static void onRadioReady()
 		 * ds = 1   // Status reports routed to TE
 		 * bfr = 1  // flush buffer
 		 */
-		at_send_command("AT+CNMI=1,2,2,1,1", NULL);
+//		at_send_command("AT+CNMI=1,2,2,1,1", NULL);
 
 		at_send_command("AT+CSCB=1", NULL);
 
@@ -5366,9 +5366,18 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 					RIL_UNSOL_RESPONSE_NEW_SMS,
 					sms_pdu, strlen(sms_pdu));
 	} else if (strStartsWith(s, "+CDS:")) {
+		char new_pdu[512];
+		int pdu_len = strlen(sms_pdu);
+		/* SMSC seems to be omitted. */
+		if (strncmp(sms_pdu, "07", 2)) {
+			strcpy(new_pdu, "00");
+			strcpy(new_pdu+2, sms_pdu);
+			pdu_len += 2;
+			sms_pdu = NULL;
+		}
 		RIL_onUnsolicitedResponse (
 				RIL_UNSOL_RESPONSE_NEW_SMS_STATUS_REPORT,
-				sms_pdu, strlen(sms_pdu));
+				sms_pdu ? sms_pdu : new_pdu, pdu_len);
 	} else if (strStartsWith(s, "+CGEV:")) {
 		/* Really, we can ignore NW CLASS and ME CLASS events here,
 		 * but right now we don't since extranous
