@@ -325,7 +325,7 @@ int encode_cdma_sms_from_ril(RIL_CDMA_SMS_Message *msg, unsigned char *buf, int 
 
 	ptr = putbyte(ptr, 6);	/* Bearer reply option */
 	ptr = putbyte(ptr, 1);	/* 1 byte */
-	ptr = putbyte(ptr, (++msgid) & 0x3f);
+	ptr = putbyte(ptr, (++msgid) << 2);	/* two low bits are reserved */
 
 	if (msg->uBearerDataLen) {
 		int i;
