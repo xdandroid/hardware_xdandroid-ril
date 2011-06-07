@@ -5312,6 +5312,7 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 	} else if (strStartsWith(s,"+CRING:")
 			|| !strcmp(s, "2") /* RING */
 			|| !strcmp(s, "3") /* NO CARRIER */
+			|| !strcmp(s, "+PCD: 1,0") /* NO CARRIER */
 			|| strStartsWith(s,"+CCWA")
 		  ) {
 		if (strStartsWith(s,"+CCWA") && phone_is == MODE_CDMA) {
@@ -5320,12 +5321,19 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			return;
 		}
 		err = 0;
-		if (s[0] == '3') {
+		if (s[0] == '3' || !strcmp(s, "+PCD: 1,0")) {
 			err = check_data();
 			if (err == Data_Connected)
 				err = 1;
 			else if (err == Data_Dialing)
 				err = 2;
+			/* +PCD is always data only */
+			if (s[0] == '+' && err == 1) {
+				RIL_onUnsolicitedResponse (
+					RIL_UNSOL_DATA_CALL_LIST_CHANGED,
+					NULL, 0);
+				return;
+			}
 		}
 		if (err < 2) {
 			RIL_onUnsolicitedResponse (
