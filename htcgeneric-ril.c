@@ -155,7 +155,7 @@ static char *sATBufferCur = NULL;
 static char sNITZtime[sizeof("08/10/28,19:08:37-20,1")+4];
 
 static const struct timeval TIMEVAL_SIMPOLL = {1,0};
-static const struct timeval TIMEVAL_CALLSTATEPOLL = {0,500000};
+static const struct timeval TIMEVAL_CALLSTATEPOLL = {1,0};
 static const struct timeval TIMEVAL_0 = {0,0};
 
 #ifdef WORKAROUND_ERRONEOUS_ANSWER
@@ -1088,11 +1088,14 @@ error:
 	RIL_onRequestComplete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
 }
 
+static int resentCallState;
+
 static void sendCallStateChanged(void *param)
 {
 	RIL_onUnsolicitedResponse (
 			RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 			NULL, 0);
+	resentCallState = 0;
 }
 
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
@@ -1222,6 +1225,7 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	if (needRepoll)
 #endif
 	{
+		resentCallState = 1;
 		RIL_requestTimedCallback (sendCallStateChanged, NULL, &TIMEVAL_CALLSTATEPOLL);
 	}
 	return;
@@ -5320,6 +5324,10 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			handle_cdma_ccwa(s);
 			return;
 		}
+		if (s[0] == '2' || strStartsWith(s, "+CRING:")) {
+			RIL_onUnsolicitedResponse(
+				RIL_UNSOL_CALL_RING, NULL, 0);
+		}
 		err = 0;
 		if (s[0] == '3' || !strcmp(s, "+PCD: 1,0")) {
 			err = check_data();
@@ -5336,9 +5344,10 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			}
 		}
 		if (err < 2) {
-			RIL_onUnsolicitedResponse (
-				RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
-				NULL, 0);
+			if (!resentCallState)
+				RIL_onUnsolicitedResponse (
+					RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
+					NULL, 0);
 			if (err == 1)
 				RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 		}
