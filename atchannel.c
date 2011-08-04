@@ -810,8 +810,10 @@ error:
         err = at_send_command_full_nolock("AT+CEER", SINGLELINE, "+CEER:", NULL,
             timeoutMsec, &err_resp);
         if (!err) {
-            free(s_last_errmsg);
-            s_last_errmsg = strdup(err_resp->p_intermediates->line);
+			if (err_resp->p_intermediates != NULL) {
+				free(s_last_errmsg);
+				s_last_errmsg = strdup(err_resp->p_intermediates->line);
+			}
             at_response_free(err_resp);
         }
     }
