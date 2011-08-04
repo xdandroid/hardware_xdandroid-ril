@@ -5559,17 +5559,19 @@ const RIL_RadioFunctions *RIL_Init(const struct RIL_Env *env, int argc, char **a
 
 	s_rilenv = env;
 
-	/* The GSM-enabled phones all use /dev/smd7 for mobile data. The pure-CDMA
-	 * phones (DIAM and RAPH) use /dev/smd1. rhod400/rhod500 have smd7 but also
-	 * support CDMA.
-	 */
-	if (access("/dev/smd7", F_OK) == 0) {
+	fd=open("/sys/class/htc_hw/radio", O_RDONLY);
+	read(fd, buffer, 32);
+	if(strncmp(buffer, "GSM",3)==0) {
 		phone_has = MODE_GSM;
 		phone_is = MODE_GSM;
-		smd7 = "/dev/smd7";
 	} else {
 		phone_has = MODE_CDMA;
 		phone_is = MODE_CDMA;
+	}
+
+	/* If /dev/smd7 exists, use it for data, otherwise defaults to smd1 */
+	if (access("/dev/smd7", F_OK) == 0) {
+		smd7 = "/dev/smd7";
 	}
 #if 0
 	parse_cmdline();
