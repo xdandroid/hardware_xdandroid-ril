@@ -1115,7 +1115,7 @@ static void sendCallStateChanged(void *param)
 	RIL_onUnsolicitedResponse (
 			RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 			NULL, 0);
-	resentCallState = 0;
+	resentCallState = 2;	/* notification needs ack */
 }
 
 static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
@@ -1142,6 +1142,8 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 		/* Might be waiting for SIM PIN */
 		RIL_onRequestComplete(t, RIL_E_RADIO_NOT_AVAILABLE, NULL, 0);
 	}
+
+	resentCallState = 0;	/* any pending notifications are ack'd now */
 
 	err = at_send_command_multiline ("AT+CLCC", "+CLCC:", &p_response);
 
@@ -1245,8 +1247,10 @@ static void requestGetCurrentCalls(void *data, size_t datalen, RIL_Token t)
 	if (needRepoll)
 #endif
 	{
-		resentCallState = 1;
-		RIL_requestTimedCallback (sendCallStateChanged, NULL, &TIMEVAL_CALLSTATEPOLL);
+		if (!resentCallState) {
+			resentCallState = 1;	/* notification is queued */
+			RIL_requestTimedCallback (sendCallStateChanged, NULL, &TIMEVAL_CALLSTATEPOLL);
+		}
 	}
 	return;
 
@@ -5364,10 +5368,12 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 			}
 		}
 		if (err < 2) {
-			if (!resentCallState)
+			if (!resentCallState) {
+				resentCallState = 1;
 				RIL_onUnsolicitedResponse (
 					RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 					NULL, 0);
+			}
 			if (err == 1)
 				RIL_requestTimedCallback (onDataCallListChanged, NULL, NULL);
 		}
