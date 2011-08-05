@@ -745,17 +745,37 @@ static void requestBasebandVersion(void *data, size_t datalen, RIL_Token t)
 	char response[256], *ptr;
 
 	/* AMSS version */
-	err = at_send_command_singleline("AT+RADIOVER", "+RADIOVER:", &p_response);
-	if (err != 0 || !p_response->success) goto error;
+	/* Old CDMA phones don't support RADIOVER command */
+	if (phone_has == MODE_CDMA && !world_phone) {
+		char *comma;
+		int len = 128;
+		err = at_send_command_singleline("AT+HTC_RSINFO=0", "+HTC_RSINFO:", &p_response);
+		if (err != 0 || !p_response->success) goto error;
 
-	line = p_response->p_intermediates->line;
+		line = p_response->p_intermediates->line;
 
-	at_tok_start(&line);
-	err = at_tok_nextstr(&line, &ptr);
-	if (err < 0) goto error;
-	strncpy(response, ptr, 128);
-	response[128] = '\0';
-	at_response_free(p_response);
+		at_tok_start(&line);
+		err = at_tok_nextstr(&line, &ptr);
+		if (err < 0) goto error;
+		comma = strchr(ptr, ',');
+		if (comma)
+			len = comma - ptr;
+		strncpy(response, ptr, len);
+		response[len] = '\0';
+		at_response_free(p_response);
+	} else {
+		err = at_send_command_singleline("AT+RADIOVER", "+RADIOVER:", &p_response);
+		if (err != 0 || !p_response->success) goto error;
+
+		line = p_response->p_intermediates->line;
+
+		at_tok_start(&line);
+		err = at_tok_nextstr(&line, &ptr);
+		if (err < 0) goto error;
+		strncpy(response, ptr, 128);
+		response[128] = '\0';
+		at_response_free(p_response);
+	}
 
 	/* Radio version */
 	err = at_send_command_singleline("AT@v", "", &p_response);
