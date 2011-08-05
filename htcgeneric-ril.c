@@ -1908,6 +1908,8 @@ static void requestRegistrationState(int request, void *data,
 
 		if (request != RIL_REQUEST_GPRS_REGISTRATION_STATE) {
 			count = 14;
+			for (i=4; i<14; i++)
+				responseStr[i] = NULL;
 		if (regstate == REG_HOME || regstate == REG_ROAM) {
 			char *line_bs;
 
@@ -1920,21 +1922,21 @@ static void requestRegistrationState(int request, void *data,
 
 			err = at_send_command_singleline("AT+HTC_BSINFO?", "+HTC_BSINFO:", &p_response_bs);
 			if (err < 0 || !p_response->success)
-				goto error;
+				goto done;
 			line_bs = p_response_bs->p_intermediates->line;
 			err = at_tok_start(&line_bs);
 			err = at_tok_nextstr(&line_bs, &responseStr[8]);
-			if (err < 0) goto error;
+			if (err < 0) goto done;
 			err = at_tok_nextstr(&line_bs, &responseStr[9]);
-			if (err < 0) goto error;
+			if (err < 0) goto done;
 			err = at_tok_nextstr(&line_bs, &responseStr[4]);
-			if (err < 0) goto error;
+			if (err < 0) goto done;
 			err = at_tok_nextstr(&line_bs, &responseStr[5]);
-			if (err < 0) goto error;
+			if (err < 0) goto done;
 			if (responseStr[5][0] == '+')
 				responseStr[5]++;
 			err = at_tok_nextstr(&line_bs, &responseStr[6]);
-			if (err < 0) goto error;
+			if (err < 0) goto done;
 			if (responseStr[6][0] == '+')
 				responseStr[6]++;
 			responseStr[7]  = "1";	/* FIXME: CDMA2000 Concurrent Services supported? */
@@ -1942,12 +1944,10 @@ static void requestRegistrationState(int request, void *data,
 			responseStr[11] = "1";	/* FIXME: current system in PRL? */
 			responseStr[12] = eriPRL;	/* Default roaming indicator */
 			responseStr[13] = "-1";
-		} else {
-			for (i=4; i<14; i++)
-				responseStr[i] = NULL;
 		}
 		}
 	}
+done:
 	sprintf(sstate, "%d", regstate);
 	sprintf(sradiotype, "%d", radiotype);
 	android_rtype = radiotype;
