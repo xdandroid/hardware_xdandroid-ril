@@ -2683,11 +2683,7 @@ static Data_State check_data() {
 
 	pthread_mutex_lock(&s_data_mutex);
 	ret = data_state;
-	if (data_state > Data_Terminated)
-		data_state = Data_Terminated;
 	pthread_mutex_unlock(&s_data_mutex);
-	if (ret > Data_Terminated)
-		PPP_KILL();
 	return ret;
 }
 
