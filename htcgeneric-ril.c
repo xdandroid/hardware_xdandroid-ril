@@ -5365,7 +5365,9 @@ static void onUnsolicited (const char *s, const char *sms_pdu)
 		}
 		if (err < 2) {
 			if (!resentCallState) {
-				resentCallState = 1;
+				if (strStartsWith(s, "+CRING:")) {
+					resentCallState = 1;
+				}
 				RIL_onUnsolicitedResponse (
 					RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED,
 					NULL, 0);
